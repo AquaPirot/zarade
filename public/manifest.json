@@ -1,0 +1,21 @@
+{
+  "name": "ZARADE - Obračun Gotovinske Zarade",
+  "short_name": "ZARADE",
+  "description": "Sistem za obračun gotovinske zarade zaposlenih",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#1e293b",
+  "theme_color": "#10b981",
+  "icons": [
+    {
+      "src": "/icon-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/icon-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
