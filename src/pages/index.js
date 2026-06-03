@@ -87,6 +87,7 @@ const Firma1 = ({ onNameChange }) => {
   const [form, setForm] = useState({ employeeId: '', paidSalary: '', transport: '', bonus: '', penalty: '', note: '' });
   const [defForm, setDefForm] = useState({ minimalac: '', transport: '' });
   const [editingDef, setEditingDef] = useState(false);
+  const [editingRecord, setEditingRecord] = useState(null);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -155,6 +156,27 @@ const Firma1 = ({ onNameChange }) => {
   const deleteRecord = (id) => {
     if (!window.confirm('Obrisati zapis?')) return;
     setRecords(p => p.filter(r => r.id !== id));
+  };
+
+  const startEdit = (rec) => setEditingRecord({
+    id: rec.id,
+    paidSalary: String(rec.paidSalary),
+    transport: String(rec.transport),
+    bonus: String(rec.bonus),
+    penalty: String(rec.penalty),
+    note: rec.note,
+  });
+
+  const saveEdit = () => {
+    setRecords(p => p.map(r => r.id === editingRecord.id ? {
+      ...r,
+      paidSalary: parseFloat(editingRecord.paidSalary) || 0,
+      transport: parseFloat(editingRecord.transport) || 0,
+      bonus: parseFloat(editingRecord.bonus) || 0,
+      penalty: parseFloat(editingRecord.penalty) || 0,
+      note: editingRecord.note,
+    } : r));
+    setEditingRecord(null);
   };
 
   const calcCash = (empId, m) => {
@@ -365,27 +387,58 @@ const Firma1 = ({ onNameChange }) => {
             {monthRecs().map(rec => {
               const emp = employees.find(e => e.id === rec.employeeId);
               const cash = calcCash(rec.employeeId, rec.month);
+              const isEditing = editingRecord?.id === rec.id;
               return (
                 <Card key={rec.id} className="p-4">
-                  <div className="flex items-start gap-3">
-                    <Avatar name={emp?.name || ''} color="indigo" />
-                    <div className="flex-1 min-w-0">
-                      <p className="font-semibold text-gray-800 mb-2">{emp?.name}</p>
-                      <div className="flex flex-wrap gap-1.5">
-                        <span className="px-2 py-0.5 bg-slate-100 text-slate-600 rounded-md text-xs">Račun: {fmt(rec.paidSalary)} RSD</span>
-                        <span className="px-2 py-0.5 bg-slate-100 text-slate-600 rounded-md text-xs">Prevoz: {fmt(rec.transport)} RSD</span>
-                        {rec.bonus > 0 && <span className="px-2 py-0.5 bg-green-50 text-green-700 rounded-md text-xs">+{fmt(rec.bonus)} bonus</span>}
-                        {rec.penalty > 0 && <span className="px-2 py-0.5 bg-red-50 text-red-600 rounded-md text-xs">-{fmt(rec.penalty)} kazna</span>}
+                  {isEditing ? (
+                    <div>
+                      <p className="text-sm font-semibold text-gray-700 mb-3">{emp?.name}</p>
+                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 mb-3">
+                        <Field label="Na račun (RSD)" type="number" value={editingRecord.paidSalary}
+                          onChange={e => setEditingRecord(p => ({ ...p, paidSalary: e.target.value }))} />
+                        <Field label="Prevoz (RSD)" type="number" value={editingRecord.transport}
+                          onChange={e => setEditingRecord(p => ({ ...p, transport: e.target.value }))} />
+                        <Field label="Bonus (RSD)" type="number" value={editingRecord.bonus}
+                          onChange={e => setEditingRecord(p => ({ ...p, bonus: e.target.value }))} />
+                        <Field label="Kazna (RSD)" type="number" value={editingRecord.penalty}
+                          onChange={e => setEditingRecord(p => ({ ...p, penalty: e.target.value }))} />
+                        <Field label="Napomena" type="text" value={editingRecord.note}
+                          onChange={e => setEditingRecord(p => ({ ...p, note: e.target.value }))}
+                          className="col-span-2" />
                       </div>
-                      {rec.note && <p className="text-xs text-gray-400 mt-1.5">{rec.note}</p>}
+                      <div className="flex gap-2">
+                        <button onClick={saveEdit} className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white text-xs font-semibold rounded-lg hover:bg-blue-700">
+                          <Check className="w-3.5 h-3.5" /> Sačuvaj
+                        </button>
+                        <button onClick={() => setEditingRecord(null)} className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-100 text-gray-600 text-xs font-semibold rounded-lg hover:bg-gray-200">
+                          <X className="w-3.5 h-3.5" /> Otkaži
+                        </button>
+                      </div>
                     </div>
-                    <div className="flex items-start gap-2 flex-shrink-0">
-                      {cash !== null && <CashTag value={cash} />}
-                      <button onClick={() => deleteRecord(rec.id)} className="p-1.5 text-gray-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all">
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
+                  ) : (
+                    <div className="flex items-start gap-3">
+                      <Avatar name={emp?.name || ''} color="indigo" />
+                      <div className="flex-1 min-w-0">
+                        <p className="font-semibold text-gray-800 mb-2">{emp?.name}</p>
+                        <div className="flex flex-wrap gap-1.5">
+                          <span className="px-2 py-0.5 bg-slate-100 text-slate-600 rounded-md text-xs">Račun: {fmt(rec.paidSalary)} RSD</span>
+                          <span className="px-2 py-0.5 bg-slate-100 text-slate-600 rounded-md text-xs">Prevoz: {fmt(rec.transport)} RSD</span>
+                          {rec.bonus > 0 && <span className="px-2 py-0.5 bg-green-50 text-green-700 rounded-md text-xs">+{fmt(rec.bonus)} bonus</span>}
+                          {rec.penalty > 0 && <span className="px-2 py-0.5 bg-red-50 text-red-600 rounded-md text-xs">-{fmt(rec.penalty)} kazna</span>}
+                        </div>
+                        {rec.note && <p className="text-xs text-gray-400 mt-1.5">{rec.note}</p>}
+                      </div>
+                      <div className="flex items-start gap-1 flex-shrink-0">
+                        {cash !== null && <CashTag value={cash} />}
+                        <button onClick={() => startEdit(rec)} className="p-1.5 text-gray-300 hover:text-blue-500 hover:bg-blue-50 rounded-lg transition-all">
+                          <Edit2 className="w-3.5 h-3.5" />
+                        </button>
+                        <button onClick={() => deleteRecord(rec.id)} className="p-1.5 text-gray-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all">
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
                     </div>
-                  </div>
+                  )}
                 </Card>
               );
             })}
@@ -464,6 +517,7 @@ const Firma2 = ({ onNameChange }) => {
   });
   const [newEmp, setNewEmp] = useState({ name: '', agreedSalary: '', dnevnica: '' });
   const [form, setForm] = useState({ employeeId: '', numDnevnica: '', numSistema: '', note: '' });
+  const [editingRecord, setEditingRecord] = useState(null);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -518,6 +572,23 @@ const Firma2 = ({ onNameChange }) => {
   const deleteRecord = (id) => {
     if (!window.confirm('Obrisati zapis?')) return;
     setRecords(p => p.filter(r => r.id !== id));
+  };
+
+  const startEdit = (rec) => setEditingRecord({
+    id: rec.id,
+    numDnevnica: String(rec.numDnevnica),
+    numSistema: String(rec.numSistema),
+    note: rec.note,
+  });
+
+  const saveEdit = () => {
+    setRecords(p => p.map(r => r.id === editingRecord.id ? {
+      ...r,
+      numDnevnica: parseFloat(editingRecord.numDnevnica) || 0,
+      numSistema: parseFloat(editingRecord.numSistema) || 0,
+      note: editingRecord.note,
+    } : r));
+    setEditingRecord(null);
   };
 
   const calcCash = (empId, m) => {
@@ -747,39 +818,69 @@ const Firma2 = ({ onNameChange }) => {
             {monthRecs().map(rec => {
               const emp = employees.find(e => e.id === rec.employeeId);
               const cash = calcCash(rec.employeeId, rec.month);
+              const isEditing = editingRecord?.id === rec.id;
               return (
                 <Card key={rec.id} className="p-4">
-                  <div className="flex items-start gap-3">
-                    <Avatar name={emp?.name || ''} color="teal" />
-                    <div className="flex-1 min-w-0">
-                      <p className="font-semibold text-gray-800 mb-2">{emp?.name}</p>
-                      <div className="flex flex-wrap gap-1.5">
-                        <span className="px-2 py-0.5 bg-slate-100 text-slate-600 rounded-md text-xs">Zarada: {fmt(emp?.agreedSalary)} RSD</span>
-                        {rec.numDnevnica > 0 && (
-                          <span className="px-2 py-0.5 bg-teal-50 text-teal-700 rounded-md text-xs">
-                            {rec.numDnevnica}× dnevnica = {fmt(rec.numDnevnica * (emp?.dnevnica || 0))} RSD
-                          </span>
-                        )}
-                        {rec.numSistema > 0 && (
-                          <span className="px-2 py-0.5 bg-teal-50 text-teal-700 rounded-md text-xs">
-                            {rec.numSistema}× sistem = {fmt(rec.numSistema * sistemRSD())} RSD
-                          </span>
-                        )}
+                  {isEditing ? (
+                    <div>
+                      <p className="text-sm font-semibold text-gray-700 mb-3">{emp?.name}</p>
+                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 mb-3">
+                        <Field
+                          label={emp ? `Dnevnice (× ${fmt(emp.dnevnica)} RSD)` : 'Broj dnevnica'}
+                          type="number" value={editingRecord.numDnevnica}
+                          onChange={e => setEditingRecord(p => ({ ...p, numDnevnica: e.target.value }))} />
+                        <Field
+                          label={`Sistemi (× ${fmt(sistemRSD())} RSD)`}
+                          type="number" value={editingRecord.numSistema}
+                          onChange={e => setEditingRecord(p => ({ ...p, numSistema: e.target.value }))} />
+                        <Field label="Napomena" type="text" value={editingRecord.note}
+                          onChange={e => setEditingRecord(p => ({ ...p, note: e.target.value }))} />
                       </div>
-                      {rec.note && <p className="text-xs text-gray-400 mt-1.5">{rec.note}</p>}
+                      <div className="flex gap-2">
+                        <button onClick={saveEdit} className="flex items-center gap-1.5 px-3 py-1.5 bg-teal-600 text-white text-xs font-semibold rounded-lg hover:bg-teal-700">
+                          <Check className="w-3.5 h-3.5" /> Sačuvaj
+                        </button>
+                        <button onClick={() => setEditingRecord(null)} className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-100 text-gray-600 text-xs font-semibold rounded-lg hover:bg-gray-200">
+                          <X className="w-3.5 h-3.5" /> Otkaži
+                        </button>
+                      </div>
                     </div>
-                    <div className="flex items-start gap-2 flex-shrink-0">
-                      {cash !== null && (
-                        <div className="text-right">
-                          <CashTag value={cash} />
-                          <div className="text-xs text-gray-400 mt-0.5 text-right">{fmtEur(cash)}</div>
+                  ) : (
+                    <div className="flex items-start gap-3">
+                      <Avatar name={emp?.name || ''} color="teal" />
+                      <div className="flex-1 min-w-0">
+                        <p className="font-semibold text-gray-800 mb-2">{emp?.name}</p>
+                        <div className="flex flex-wrap gap-1.5">
+                          <span className="px-2 py-0.5 bg-slate-100 text-slate-600 rounded-md text-xs">Zarada: {fmt(emp?.agreedSalary)} RSD</span>
+                          {rec.numDnevnica > 0 && (
+                            <span className="px-2 py-0.5 bg-teal-50 text-teal-700 rounded-md text-xs">
+                              {rec.numDnevnica}× dnevnica = {fmt(rec.numDnevnica * (emp?.dnevnica || 0))} RSD
+                            </span>
+                          )}
+                          {rec.numSistema > 0 && (
+                            <span className="px-2 py-0.5 bg-teal-50 text-teal-700 rounded-md text-xs">
+                              {rec.numSistema}× sistem = {fmt(rec.numSistema * sistemRSD())} RSD
+                            </span>
+                          )}
                         </div>
-                      )}
-                      <button onClick={() => deleteRecord(rec.id)} className="p-1.5 text-gray-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all">
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
+                        {rec.note && <p className="text-xs text-gray-400 mt-1.5">{rec.note}</p>}
+                      </div>
+                      <div className="flex items-start gap-1 flex-shrink-0">
+                        {cash !== null && (
+                          <div className="text-right">
+                            <CashTag value={cash} />
+                            <div className="text-xs text-gray-400 mt-0.5 text-right">{fmtEur(cash)}</div>
+                          </div>
+                        )}
+                        <button onClick={() => startEdit(rec)} className="p-1.5 text-gray-300 hover:text-teal-500 hover:bg-teal-50 rounded-lg transition-all">
+                          <Edit2 className="w-3.5 h-3.5" />
+                        </button>
+                        <button onClick={() => deleteRecord(rec.id)} className="p-1.5 text-gray-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all">
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
                     </div>
-                  </div>
+                  )}
                 </Card>
               );
             })}
