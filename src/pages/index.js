@@ -452,9 +452,9 @@ const Firma1 = ({ onNameChange }) => {
 // ─── FIRMA 2 ──────────────────────────────────────────────────────────────────
 const Firma2 = ({ onNameChange }) => {
   const [name, setName] = useState('Firma 2');
-  const [eurRate, setEurRate] = useState(117);
+  const [eurRate, setEurRate] = useState(117.5);
   const [editingRate, setEditingRate] = useState(false);
-  const [rateInput, setRateInput] = useState('117');
+  const [rateInput, setRateInput] = useState('117.5');
   const [employees, setEmployees] = useState([]);
   const [records, setRecords] = useState([]);
   const [tab, setTab] = useState('employees');
@@ -470,8 +470,8 @@ const Firma2 = ({ onNameChange }) => {
     const g = (k, fb) => { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : fb; } catch { return fb; } };
     const n = localStorage.getItem('f2_name') || 'Firma 2';
     setName(n); onNameChange?.(n);
-    const s = g('f2_settings', { eurRate: 117 });
-    setEurRate(s.eurRate || 117); setRateInput(String(s.eurRate || 117));
+    const s = g('f2_settings', { eurRate: 117.5 });
+    setEurRate(s.eurRate || 117.5); setRateInput(String(s.eurRate || 117.5));
     setEmployees(g('f2_employees', []));
     setRecords(g('f2_records', []));
   }, []);
@@ -481,7 +481,9 @@ const Firma2 = ({ onNameChange }) => {
   useEffect(() => { if (typeof window !== 'undefined') localStorage.setItem('f2_employees', JSON.stringify(employees)); }, [employees]);
   useEffect(() => { if (typeof window !== 'undefined') localStorage.setItem('f2_records', JSON.stringify(records)); }, [records]);
 
-  const sistemRSD = () => 10 * (eurRate || 117);
+  const sistemRSD = () => 10 * (eurRate || 117.5);
+  const toEur = (rsd) => (rsd / (eurRate || 117.5)).toFixed(2);
+  const fmtEur = (rsd) => `${toEur(rsd)} €`;
 
   const addEmployee = () => {
     if (!newEmp.name.trim() || !newEmp.agreedSalary) return;
@@ -547,7 +549,9 @@ const Firma2 = ({ onNameChange }) => {
       doc.setFontSize(11); doc.setFont(undefined, 'normal');
       doc.text(`Mesec: ${month}   |   Datum: ${new Date().toLocaleDateString('sr-RS')}`, pw / 2, y, { align: 'center' }); y += 18;
       doc.setFontSize(14); doc.setFont(undefined, 'bold'); doc.setTextColor(13, 148, 136);
-      doc.text(`UKUPNA GOTOVINA: ${fmt(totalCash())} RSD`, pw / 2, y, { align: 'center' }); y += 18; doc.setTextColor(0, 0, 0);
+      doc.text(`UKUPNA GOTOVINA: ${fmt(totalCash())} RSD  (${fmtEur(totalCash())})`, pw / 2, y, { align: 'center' }); y += 8;
+      doc.setFontSize(9); doc.setFont(undefined, 'normal');
+      doc.text(`Kurs: 1 EUR = ${eurRate} RSD`, pw / 2, y, { align: 'center' }); y += 14; doc.setTextColor(0, 0, 0);
       employees.forEach(emp => {
         if (y > 255) { doc.addPage(); y = 25; }
         const rec = records.find(r => r.employeeId === emp.id && r.month === month);
@@ -569,7 +573,7 @@ const Firma2 = ({ onNameChange }) => {
           if (rec.note) { doc.text(`Napomena: ${rec.note}`, mg + 4, y); y += 5; }
         } else { doc.setTextColor(160, 160, 160); doc.text('Nema unosa', mg + 4, y); y += 5; doc.setTextColor(0, 0, 0); }
         doc.setFont(undefined, 'bold');
-        if (cash !== null) { doc.setTextColor(0, 130, 0); doc.text(`GOTOVINA: +${fmt(cash)} RSD`, mg + 4, y); }
+        if (cash !== null) { doc.setTextColor(0, 130, 0); doc.text(`GOTOVINA: +${fmt(cash)} RSD  (${fmtEur(cash)})`, mg + 4, y); }
         doc.setTextColor(0, 0, 0); y += 12;
         doc.setDrawColor(220, 220, 220); doc.line(mg, y - 4, pw - mg, y - 4); y += 4;
       });
@@ -724,7 +728,10 @@ const Firma2 = ({ onNameChange }) => {
                 )}
                 <div className="border-t border-teal-200 pt-2 flex justify-between font-bold text-teal-800">
                   <span>Ukupno gotovina</span>
-                  <span>{fmt(previewCash)} RSD</span>
+                  <div className="text-right">
+                    <div>{fmt(previewCash)} RSD</div>
+                    <div className="text-teal-500 font-normal text-xs">{fmtEur(previewCash)}</div>
+                  </div>
                 </div>
               </div>
             )}
@@ -762,7 +769,12 @@ const Firma2 = ({ onNameChange }) => {
                       {rec.note && <p className="text-xs text-gray-400 mt-1.5">{rec.note}</p>}
                     </div>
                     <div className="flex items-start gap-2 flex-shrink-0">
-                      {cash !== null && <CashTag value={cash} />}
+                      {cash !== null && (
+                        <div className="text-right">
+                          <CashTag value={cash} />
+                          <div className="text-xs text-gray-400 mt-0.5 text-right">{fmtEur(cash)}</div>
+                        </div>
+                      )}
                       <button onClick={() => deleteRecord(rec.id)} className="p-1.5 text-gray-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all">
                         <Trash2 className="w-3.5 h-3.5" />
                       </button>
@@ -789,7 +801,8 @@ const Firma2 = ({ onNameChange }) => {
           <div className="bg-gradient-to-br from-teal-600 to-emerald-700 rounded-2xl p-6 text-white">
             <p className="text-teal-200 text-xs font-semibold uppercase tracking-wider mb-1">Ukupna gotovina</p>
             <p className="text-4xl font-bold tracking-tight">{fmt(totalCash())} RSD</p>
-            <p className="text-teal-300 text-xs mt-2">{name} · {month}</p>
+            <p className="text-teal-100 text-lg font-semibold mt-1">{fmtEur(totalCash())}</p>
+            <p className="text-teal-300 text-xs mt-1">{name} · {month} · kurs {eurRate} RSD/€</p>
           </div>
 
           <div className="space-y-2">
@@ -810,7 +823,12 @@ const Firma2 = ({ onNameChange }) => {
                         </div>
                       ) : <p className="text-xs text-gray-300 italic">nema obračuna</p>}
                     </div>
-                    {cash !== null ? <CashTag value={cash} /> : <span className="text-xs text-gray-300">—</span>}
+                    {cash !== null ? (
+                      <div className="text-right flex-shrink-0">
+                        <CashTag value={cash} />
+                        <div className="text-xs text-gray-400 mt-0.5">{fmtEur(cash)}</div>
+                      </div>
+                    ) : <span className="text-xs text-gray-300">—</span>}
                   </div>
                 </Card>
               );
