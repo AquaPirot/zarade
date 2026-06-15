@@ -84,6 +84,9 @@ const isSa   = (y,m,d) => dw(y,m,d)===6;
 const stdDays = (y,m) => { let c=0; for(let d=1;d<=dim(y,m);d++){ const w=dw(y,m,d); if(w>=1&&w<=5)c++; } return c; };
 const effW   = (y,m,d,dd) => { if(isSu(y,m,d))return false; if(dd?.state==='worked')return true; if(dd?.state==='off')return false; return!isSa(y,m,d); };
 const cntW   = (y,m,eid,ym,att) => { let c=0; for(let d=1;d<=dim(y,m);d++) if(effW(y,m,d,att?.[eid]?.[ym]?.[d]))c++; return c; };
+// Efektivni dani za platu: subote su u okviru plate (ne dižu je), ali nadoknađuju
+// propuštene radne dane → broj odrađenih ograničen na standardne radne dane (pon–pet).
+const effDays = (y,m,eid,ym,att) => Math.min(cntW(y,m,eid,ym,att), stdDays(y,m));
 const hasAtt = (eid,ym,att) => Object.keys(att?.[eid]?.[ym]||{}).length>0;
 
 // ── UI Primitives ─────────────────────────────────────────────────────────────
@@ -335,7 +338,7 @@ const ProhorecaApp = () => {
     if(!emp) return 0;
     if(!hasAtt(eid,m,attendance)) return emp.agreedSalary||0;
     const[y,mo]=m.split('-').map(Number); const m0=mo-1;
-    const sd=stdDays(y,m0), wd=cntW(y,m0,eid,m,attendance);
+    const sd=stdDays(y,m0), wd=effDays(y,m0,eid,m,attendance);
     return sd>0 ? Math.round((emp.agreedSalary||0)*wd/sd) : (emp.agreedSalary||0);
   };
   const calcExtras = (eid,m) => {
@@ -441,7 +444,7 @@ const ProhorecaApp = () => {
       employees.forEach(emp=>{
         if(y>255){doc.addPage();y=24;}
         const[yr,mo]=month.split('-').map(Number); const m0=mo-1;
-        const sd=stdDays(yr,m0); const wd=hasAtt(emp.id,month,attendance)?cntW(yr,m0,emp.id,month,attendance):sd;
+        const sd=stdDays(yr,m0); const wd=hasAtt(emp.id,month,attendance)?effDays(yr,m0,emp.id,month,attendance):sd;
         const base=calcBase(emp.id,month);
         const rec=records.find(r=>r.eid===emp.id&&r.month===month);
         const total=calcTotal(emp.id,month);
@@ -480,7 +483,7 @@ const ProhorecaApp = () => {
       doc.text(`Ugovorena mesecna plata: ${fmt(emp.agreedSalary)} RSD`,mg,y); y+=5;
       doc.text(`Ugovorena dnevnica: ${fmt(emp.dnevnica)} RSD`,mg,y); y+=14;
       const[yr,mo]=m.split('-').map(Number); const m0=mo-1;
-      const sd=stdDays(yr,m0), wd=hasAtt(eid,m,attendance)?cntW(yr,m0,eid,m,attendance):sd;
+      const sd=stdDays(yr,m0), wd=hasAtt(eid,m,attendance)?effDays(yr,m0,eid,m,attendance):sd;
       const base=calcBase(eid,m);
       const rec=records.find(r=>r.eid===eid&&r.month===m);
       const drawRow=(label,value,color)=>{ if(color)doc.setTextColor(...color);else doc.setTextColor(30,30,30); doc.setFontSize(10); doc.setFont(undefined,'normal'); doc.text(label,mg,y); doc.setFont(undefined,'bold'); doc.text(value,pw-mg,y,{align:'right'}); y+=8; doc.setTextColor(30,30,30); };
@@ -516,6 +519,7 @@ const ProhorecaApp = () => {
   const [attY,attMo0] = attEmpObj ? month.split('-').map((n,i)=>i===0?+n:+n-1) : [0,0];
   const attStd = attEmpObj ? stdDays(attY,attMo0) : 0;
   const attWkd = attEmpObj ? cntW(attY,attMo0,attEmpObj.id,month,attendance) : 0;
+  const attEff = attEmpObj ? Math.min(attWkd,attStd) : 0;
   const prevMonth=()=>{ const d=new Date(`${month}-01`); d.setMonth(d.getMonth()-1); setMonth(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`); };
   const nextMonth=()=>{ const d=new Date(`${month}-01`); d.setMonth(d.getMonth()+1); setMonth(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`); };
 
@@ -641,8 +645,8 @@ const ProhorecaApp = () => {
                 <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:10 }}>
                   {[
                     {l:'Radnih dana',v:`${attStd}`,sub:'standard (pon–pet)'},
-                    {l:'Odrađeno',v:`${attWkd}`,sub:`od ${attStd} dana`},
-                    {l:'Osnova plate',v:`${fmt(calcBase(attEmpObj.id,month))} RSD`,sub:attWkd<attStd?`pro-rata ${attWkd}/${attStd}`:'puna plata'},
+                    {l:'Odrađeno',v:`${attWkd}`,sub:attWkd>attStd?`${attStd} + ${attWkd-attStd} sub.`:`od ${attStd} dana`},
+                    {l:'Osnova plate',v:`${fmt(calcBase(attEmpObj.id,month))} RSD`,sub:attEff<attStd?`pro-rata ${attEff}/${attStd}`:'puna plata'},
                   ].map(({l,v,sub})=>(
                     <Card key={l} style={{ padding:'14px 16px', textAlign:'center' }}>
                       <p style={{ fontFamily:MF, fontWeight:700, fontSize:10, color:'#9CA3AF', letterSpacing:'0.07em', marginBottom:4 }}>{l.toUpperCase()}</p>
@@ -660,6 +664,9 @@ const ProhorecaApp = () => {
                     </div>
                   </div>
                   <MonthCalendar eid={attEmpObj.id} month={month} att={attendance} onUpdate={updAtt}/>
+                  <p style={{ fontFamily:CF, fontStyle:'italic', fontSize:12.5, color:'#A8A29E', margin:'14px 0 0', lineHeight:1.5, borderTop:'1px solid #F0EDE7', paddingTop:12 }}>
+                    Subota je u okviru ugovorene plate — radna subota <strong style={{ fontFamily:MF, fontStyle:'normal', color:GD, fontWeight:600 }}>ne povećava</strong> platu, ali nadoknađuje propušteni radni dan (pon–pet). Plata se smanjuje samo ako je odrađeno manje od {attStd} standardnih radnih dana.
+                  </p>
                 </Card>
                 <div style={{ display:'flex', justifyContent:'center' }}>
                   <Btn onClick={()=>genPayslipPDF(attEmpObj.id,month)} v="dark"><FileText size={16}/> Isplatni listić — {attEmpObj.name}</Btn>
@@ -725,7 +732,7 @@ const ProhorecaApp = () => {
                 const emp=employees.find(e=>e.id===rec.eid); const total=calcTotal(rec.eid,month); const paid=totalPaid(rec.eid,month);
                 const isEd=editRec?.id===rec.id;
                 const[yr2,mo2]=month.split('-').map(Number); const m02=mo2-1;
-                const wdCnt=hasAtt(rec.eid,month,attendance)?cntW(yr2,m02,rec.eid,month,attendance):stdDays(yr2,m02);
+                const wdCnt=hasAtt(rec.eid,month,attendance)?effDays(yr2,m02,rec.eid,month,attendance):stdDays(yr2,m02);
                 const sdCnt=stdDays(yr2,m02);
                 return (
                   <Card key={rec.id} style={{ padding:18 }}>
