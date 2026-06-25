@@ -40,3 +40,5 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 prohoreca_upload.zip
+prohoreca_update.zip
+*.zip
