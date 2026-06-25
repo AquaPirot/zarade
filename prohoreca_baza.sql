@@ -85,6 +85,32 @@ CREATE TABLE IF NOT EXISTS `payments` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- -----------------------------------------------------------
+-- Tereni (montaže)
+-- -----------------------------------------------------------
+CREATE TABLE IF NOT EXISTS `tereni` (
+  `id`         INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  `teren_date` DATE NOT NULL,
+  `month`      CHAR(7) NOT NULL,           -- YYYY-MM (izvedeno iz datuma)
+  `location`   VARCHAR(255) NOT NULL DEFAULT '',
+  `note`       TEXT,
+  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  KEY `idx_teren_month` (`month`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Ko je išao na teren i koliko sistema (pergola) je uradio
+CREATE TABLE IF NOT EXISTS `teren_workers` (
+  `id`          INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  `teren_id`    INT UNSIGNED NOT NULL,
+  `employee_id` INT UNSIGNED NOT NULL,
+  `systems`     DECIMAL(8,2) NOT NULL DEFAULT 0.00,  -- broj sistema/pergola
+  UNIQUE KEY `uq_tw` (`teren_id`, `employee_id`),
+  CONSTRAINT `fk_tw_teren` FOREIGN KEY (`teren_id`)
+    REFERENCES `tereni`(`id`) ON DELETE CASCADE ON UPDATE CASCADE,
+  CONSTRAINT `fk_tw_emp` FOREIGN KEY (`employee_id`)
+    REFERENCES `employees`(`id`) ON DELETE CASCADE ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- -----------------------------------------------------------
 -- Korisni VIEW-ovi (opciono — olaksavaju izvestaje)
 -- -----------------------------------------------------------
 
@@ -111,10 +137,16 @@ FROM attendance a
 JOIN employees e ON e.id = a.employee_id
 GROUP BY a.employee_id, a.month;
 
-SET FOREIGN_KEY_CHECKS = 1;
+-- Pregled terena — ukupno sistema po mesecu i radniku
+CREATE OR REPLACE VIEW `v_teren_systems` AS
+SELECT
+  t.month,
+  tw.employee_id,
+  e.name          AS employee_name,
+  SUM(tw.systems) AS total_systems
+FROM teren_workers tw
+JOIN tereni t    ON t.id = tw.teren_id
+JOIN employees e ON e.id = tw.employee_id
+GROUP BY t.month, tw.employee_id;
 
--- =============================================================
--- Napomena: aplikacija trenutno čuva podatke u localStorage
--- (browser keš). Ovaj SQL je osnova za PHP/API backend kada
--- budeš prelazio sa localStorage na pravu bazu.
--- =============================================================
+SET FOREIGN_KEY_CHECKS = 1;

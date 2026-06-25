@@ -3,7 +3,7 @@ import React, { useState, useEffect } from 'react';
 import {
   Plus, Trash2, Calculator, Users, Calendar, Download, Edit2,
   Check, X, ChevronLeft, ChevronRight, CreditCard, TrendingUp,
-  RefreshCw, FileText, AlertCircle,
+  RefreshCw, FileText, AlertCircle, MapPin, Layers,
 } from 'lucide-react';
 
 // ── Design Tokens ─────────────────────────────────────────────────────────────
@@ -49,6 +49,12 @@ const api = {
   addPayment:    (d)  => fetch(`${API}/payments.php`, { method:'POST', headers:h, body:JSON.stringify(d) }).then(r => r.json()),
   deletePayment: (id) => fetch(`${API}/payments.php?id=${id}`, { method:'DELETE' }),
 
+  // Tereni
+  getTereni:    ()      => fetch(`${API}/tereni.php`).then(r => r.json()),
+  addTeren:     (d)     => fetch(`${API}/tereni.php`, { method:'POST', headers:h, body:JSON.stringify(d) }).then(r => r.json()),
+  updateTeren:  (id, d) => fetch(`${API}/tereni.php?id=${id}`, { method:'PUT', headers:h, body:JSON.stringify(d) }).then(r => r.json()),
+  deleteTeren:  (id)    => fetch(`${API}/tereni.php?id=${id}`, { method:'DELETE' }),
+
   // NBS rate
   getRate: () => fetch(`${API}/eur-rate.php`).then(r => r.json()),
 };
@@ -69,6 +75,9 @@ const toAtt = (rows) => {
 const toRec = (r) => ({ id:+r.id, eid:+r.employee_id, month:r.month, numDnevnica:parseFloat(r.num_dnevnica)||0, numPergola:parseFloat(r.num_pergola)||0, note:r.note||'' });
 // Convert PHP row → payment object
 const toPay = (r) => ({ id:+r.id, eid:+r.employee_id, month:r.month, amount:parseFloat(r.amount)||0, date:r.payment_date||'', method:r.method||'cash', note:r.note||'' });
+// Convert PHP row → teren object (sa ugnježdenim radnicima)
+const toTeren = (r) => ({ id:+r.id, date:r.teren_date||'', month:r.month||'', location:r.location||'', note:r.note||'',
+  workers:(r.workers||[]).map(w=>({ eid:+w.employee_id, name:w.name||'', systems:parseFloat(w.systems)||0 })) });
 
 // ── Utils ─────────────────────────────────────────────────────────────────────
 const fmt    = (n) => Math.round(n||0).toLocaleString('sr-RS');
@@ -274,6 +283,48 @@ const MonthCalendar = ({ eid, month, att, onUpdate }) => {
   );
 };
 
+// ── Teren form fields (deljeno: dodavanje + izmena) ─────────────────────────────
+const TerenFields = ({ employees, val, set, pRSD }) => {
+  const setW   = (i,patch) => set({ ...val, workers: val.workers.map((w,j)=>j===i?{...w,...patch}:w) });
+  const addRow = () => set({ ...val, workers:[...val.workers, { eid:'', systems:'' }] });
+  const delRow = (i) => set({ ...val, workers: val.workers.filter((_,j)=>j!==i) });
+  const totSys = val.workers.reduce((a,w)=>a+(parseFloat(w.systems)||0),0);
+  return (
+    <div>
+      <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(150px,1fr))', gap:12, marginBottom:14 }}>
+        <Field label="Datum terena" type="date" value={val.date} onChange={e=>set({ ...val, date:e.target.value })}/>
+        <Field label="Lokacija" type="text" placeholder="npr. Novi Sad, Liman" value={val.location} onChange={e=>set({ ...val, location:e.target.value })}/>
+        <Field label="Napomena" type="text" placeholder="..." value={val.note} onChange={e=>set({ ...val, note:e.target.value })}/>
+      </div>
+      <FL>Ko je išao i koliko sistema</FL>
+      <div style={{ display:'flex', flexDirection:'column', gap:8, marginBottom:10 }}>
+        {val.workers.map((w,i)=>(
+          <div key={i} style={{ display:'flex', gap:8, alignItems:'center' }}>
+            <div style={{ flex:1 }}>
+              <select value={w.eid} onChange={e=>setW(i,{ eid:e.target.value })}
+                style={{ width:'100%', padding:'10px 13px', background:'#FAFAF9', border:'1.5px solid #E9E5DE', borderRadius:11, fontSize:13, fontFamily:MF, fontWeight:500, outline:'none', color:A }}>
+                <option value="">Izaberi radnika...</option>
+                {employees.map(e=><option key={e.id} value={e.id}>{e.name}</option>)}
+              </select>
+            </div>
+            <div style={{ width:110 }}>
+              <FI type="number" placeholder="sistema" value={w.systems} onChange={e=>setW(i,{ systems:e.target.value })} style={{ padding:'10px 12px' }}/>
+            </div>
+            <button onClick={()=>delRow(i)} title="Ukloni" style={{ background:'none', border:'1.5px solid #E9E5DE', borderRadius:10, padding:8, cursor:'pointer', color:'#EF4444', flexShrink:0 }}><X size={15}/></button>
+          </div>
+        ))}
+      </div>
+      <button onClick={addRow} style={{ background:'none', border:`1.5px dashed ${G}80`, borderRadius:11, padding:'8px 14px', cursor:'pointer', color:GD, fontFamily:MF, fontWeight:700, fontSize:12, display:'inline-flex', alignItems:'center', gap:6, marginBottom:12 }}>
+        <Plus size={14}/> Dodaj radnika
+      </button>
+      <div style={{ background:GL, borderRadius:12, padding:'10px 16px', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+        <span style={{ fontFamily:CF, fontStyle:'italic', fontSize:13, color:GD }}>Ukupno sistema: <strong style={{ fontFamily:MF, fontStyle:'normal' }}>{totSys}</strong></span>
+        <span style={{ fontFamily:MF, fontWeight:700, fontSize:13, color:A }}>Bonus: {fmt(totSys*pRSD)} RSD</span>
+      </div>
+    </div>
+  );
+};
+
 // ── Main App ──────────────────────────────────────────────────────────────────
 const ProhorecaApp = () => {
   const [appName, setAppName]           = useState('Prohoreca');
@@ -283,6 +334,7 @@ const ProhorecaApp = () => {
   const [attendance, setAttendance]     = useState({});
   const [records, setRecords]           = useState([]);
   const [payments, setPayments]         = useState([]);
+  const [tereni, setTereni]             = useState([]);
   const [tab, setTab]                   = useState('workers');
   const [month, setMonth]               = useState(now);
   const [attEmp, setAttEmp]             = useState(null);
@@ -299,6 +351,10 @@ const ProhorecaApp = () => {
   const [editRec, setEditRec] = useState(null);
   // Payment form
   const [payForm, setPayForm] = useState({ eid:'', amount:'', date:'', method:'cash', note:'' });
+  // Teren form
+  const blankTeren = { date:'', location:'', note:'', workers:[{ eid:'', systems:'' }] };
+  const [terenForm, setTerenForm] = useState(blankTeren);
+  const [editTeren, setEditTeren] = useState(null);
 
   const showErr = (msg) => { setToast(msg); setTimeout(()=>setToast(''),4000); };
 
@@ -306,8 +362,8 @@ const ProhorecaApp = () => {
   useEffect(()=>{
     const load = async () => {
       try {
-        const [sett, emps, att, recs, pays] = await Promise.all([
-          api.getSettings(), api.getEmployees(), api.getAttendance(), api.getRecords(), api.getPayments()
+        const [sett, emps, att, recs, pays, ters] = await Promise.all([
+          api.getSettings(), api.getEmployees(), api.getAttendance(), api.getRecords(), api.getPayments(), api.getTereni()
         ]);
         if (sett && !sett.error) {
           setAppName(sett.app_name || 'Prohoreca');
@@ -318,6 +374,7 @@ const ProhorecaApp = () => {
         if (Array.isArray(att)) setAttendance(toAtt(att));
         if (Array.isArray(recs)) setRecords(recs.map(toRec));
         if (Array.isArray(pays)) setPayments(pays.map(toPay));
+        if (Array.isArray(ters)) setTereni(ters.map(toTeren));
       } catch(e) {
         showErr('Ne mogu da se povežem sa serverom. Provjeri config.php.');
         console.error(e);
@@ -363,11 +420,14 @@ const ProhorecaApp = () => {
     const wd=cntW(y,m0,eid,m,attendance);
     return Math.round((emp.agreedSalary||0)*wd/sd);
   };
-  // Dodaci = pergole (dnevnice/dodatni dani sada idu preko kalendara, ne ručno)
+  // Broj sistema (pergola) sa terena za radnika u mesecu
+  const terenSystems = (eid,m) => tereni.filter(t=>t.month===m)
+    .reduce((s,t)=> s + t.workers.filter(w=>w.eid===eid).reduce((a,w)=>a+(w.systems||0),0), 0);
+  // Dodaci = pergole sa terena + ručne pergole (legacy). Dnevnice/dani idu preko kalendara.
   const calcExtras = (eid,m) => {
     const rec=records.find(r=>r.eid===eid&&r.month===m);
-    if(!rec) return 0;
-    return (rec.numPergola||0)*pRSD();
+    const manual=(rec?.numPergola||0);
+    return (terenSystems(eid,m)+manual)*pRSD();
   };
   const calcTotal    = (eid,m) => { const emp=employees.find(e=>e.id===eid); if(!emp)return null; return calcBase(eid,m)+calcExtras(eid,m); };
   const totalMonth   = (m) => employees.reduce((s,e)=>s+Math.max(0,calcTotal(e.id,m)??0),0);
@@ -452,6 +512,32 @@ const ProhorecaApp = () => {
     catch { showErr('Brisanje nije uspjelo.'); }
   };
 
+  // ── Tereni ──
+  const cleanWorkers = (ws) => (ws||[]).filter(w=>w.eid).map(w=>({ employee_id:parseInt(w.eid), systems:parseFloat(w.systems)||0 }));
+  const addTeren = async () => {
+    if(!terenForm.date) return showErr('Unesi datum terena.');
+    try {
+      const created = await api.addTeren({ teren_date:terenForm.date, location:terenForm.location, note:terenForm.note, workers:cleanWorkers(terenForm.workers) });
+      if(created?.error) return showErr(created.error);
+      setTereni(p=>[toTeren(created), ...p]);
+      setTerenForm(blankTeren);
+    } catch { showErr('Teren nije dodat.'); }
+  };
+  const saveTeren = async () => {
+    if(!editTeren?.date) return showErr('Unesi datum terena.');
+    try {
+      const updated = await api.updateTeren(editTeren.id, { teren_date:editTeren.date, location:editTeren.location, note:editTeren.note, workers:cleanWorkers(editTeren.workers) });
+      if(updated?.error) return showErr(updated.error);
+      setTereni(p=>p.map(t=>t.id===editTeren.id?toTeren(updated):t));
+      setEditTeren(null);
+    } catch { showErr('Izmjena nije snimljena.'); }
+  };
+  const delTeren = async (id) => {
+    if(!window.confirm('Obrisati teren?')) return;
+    try { await api.deleteTeren(id); setTereni(p=>p.filter(t=>t.id!==id)); }
+    catch { showErr('Brisanje nije uspjelo.'); }
+  };
+
   // ── PDF — monthly ──
   const genMonthPDF = async () => {
     try {
@@ -474,7 +560,9 @@ const ProhorecaApp = () => {
         doc.setFontSize(9); doc.setFont(undefined,'normal');
         doc.text(`Plata: ${fmt(emp.agreedSalary)} RSD · Dnevnica: ${fmt(dnevnicaFor(emp.agreedSalary,yr,m0))} RSD`,mg+4,y); y+=5;
         doc.text(`Prisustvo: ${wd}/${sd} dana · Osnova: ${fmt(base)} RSD`,mg+4,y); y+=5;
-        if(rec?.numPergola>0){doc.setTextColor(0,100,0);doc.text(`Pergole: ${rec.numPergola}x ${fmt(pRSD())} = ${fmt(rec.numPergola*pRSD())} RSD`,mg+4,y);y+=5;doc.setTextColor(0,0,0);}
+        const sysM=terenSystems(emp.id,month);
+        if(sysM>0){doc.setTextColor(0,100,0);doc.text(`Pergole (tereni): ${sysM}x ${fmt(pRSD())} = ${fmt(sysM*pRSD())} RSD`,mg+4,y);y+=5;doc.setTextColor(0,0,0);}
+        if(rec?.numPergola>0){doc.setTextColor(0,100,0);doc.text(`Pergole (rucno): ${rec.numPergola}x ${fmt(pRSD())} = ${fmt(rec.numPergola*pRSD())} RSD`,mg+4,y);y+=5;doc.setTextColor(0,0,0);}
         doc.setFont(undefined,'bold'); doc.setTextColor(0,110,0);
         doc.text(`GOTOVINA: ${fmt(total)} RSD (${fmtEur(total,eurRate)})`,mg+4,y); y+=5;
         const paid=totalPaid(emp.id,month);
@@ -511,7 +599,9 @@ const ProhorecaApp = () => {
       doc.setFontSize(9); doc.setTextColor(120,120,120); doc.text('OBRACUN',mg,y); y+=5;
       doc.setDrawColor(220,215,200); doc.line(mg,y,pw-mg,y); y+=5;
       drawRow(`Osnovna plata (${wd}/${sd} dana)`,`${fmt(base)} RSD`);
-      if(rec?.numPergola>0) drawRow(`Pergole: ${rec.numPergola}x ${fmt(pRSD())} RSD`,`${fmt(rec.numPergola*pRSD())} RSD`,[0,110,0]);
+      const sysP=terenSystems(eid,m);
+      if(sysP>0) drawRow(`Pergole (tereni): ${sysP}x ${fmt(pRSD())} RSD`,`${fmt(sysP*pRSD())} RSD`,[0,110,0]);
+      if(rec?.numPergola>0) drawRow(`Pergole (rucno): ${rec.numPergola}x ${fmt(pRSD())} RSD`,`${fmt(rec.numPergola*pRSD())} RSD`,[0,110,0]);
       const notes=Object.entries(attendance[eid]?.[m]||{}).filter(([,dd])=>dd?.note);
       if(notes.length>0){ y+=4; doc.setFontSize(9); doc.setTextColor(120,120,120); doc.text('NAPOMENE',mg,y); y+=5; doc.line(mg,y,pw-mg,y); y+=5; notes.sort(([a],[b])=>+a-+b).forEach(([d,dd])=>{ doc.setFontSize(9); doc.setTextColor(100,90,0); doc.text(`${d}.  ${dd.note}`,mg+4,y); y+=6; }); }
       y+=6; doc.line(mg,y,pw-mg,y); y+=8;
@@ -546,6 +636,7 @@ const ProhorecaApp = () => {
   const TABS=[
     {k:'workers',   l:'Radnici',   I:Users},
     {k:'attendance',l:'Prisustvo', I:Calendar},
+    {k:'tereni',    l:'Tereni',    I:MapPin},
     {k:'payroll',   l:'Obračun',   I:Calculator},
     {k:'payments',  l:'Isplate',   I:CreditCard},
     {k:'annual',    l:'Godišnji',  I:TrendingUp},
@@ -686,7 +777,7 @@ const ProhorecaApp = () => {
                   <div style={{ display:'flex', gap:14, flexWrap:'wrap', margin:'14px 0 0', paddingTop:12, borderTop:'1px solid #F0EDE7' }}>
                     {[
                       {c:GL,   b:'#E0D09E', t:'Radni dan (pon–pet)'},
-                      {c:G,    b:G,         t:'Radni vikend — dodatni dan'},
+                      {c:G,    b:G,         t:'Radna subota / nedelja'},
                       {c:'#F3F4F6', b:'#E5E7EB', t:'Slobodan'},
                     ].map(({c,b,t})=>(
                       <span key={t} style={{ display:'inline-flex', alignItems:'center', gap:7, fontFamily:MF, fontSize:11.5, color:'#78716C', fontWeight:600 }}>
@@ -696,7 +787,7 @@ const ProhorecaApp = () => {
                   </div>
                   <p style={{ fontFamily:CF, fontStyle:'italic', fontSize:12.5, color:'#A8A29E', margin:'10px 0 0', lineHeight:1.5 }}>
                     Dnevnica = mesečna plata ÷ {attStd} radnih dana = <strong style={{ fontFamily:MF, fontStyle:'normal', color:GD, fontWeight:600 }}>{fmt(dnevnicaFor(attEmpObj.agreedSalary,attY,attMo0))} RSD</strong>.
-                    Pon–pet su podrazumevano radni; klikni subotu/nedelju da je označiš kao <strong style={{ fontFamily:MF, fontStyle:'normal', color:GD, fontWeight:600 }}>radnu</strong> (dodatni dan), a radni dan da ga označiš kao slobodan. Svaki radni dan = +1 dnevnica.
+                    Norma već isključuje 2 slobodne subote. Pon–pet su podrazumevano radni — klikni <strong style={{ fontFamily:MF, fontStyle:'normal', color:GD, fontWeight:600 }}>radne subote i nedelje</strong> da ih označiš, a izostanak (pon–pet) da ga označiš slobodnim. Svaki radni dan = +1 dnevnica.
                   </p>
                 </Card>
                 <div style={{ display:'flex', justifyContent:'center' }}>
@@ -705,6 +796,72 @@ const ProhorecaApp = () => {
               </>)}
               {!attEmpObj&&employees.length>0&&<Empty Icon={Calendar} text="Izaberi radnika da vidiš kalendar prisustva."/>}
               {employees.length===0&&<Empty Icon={Users} text="Dodaj radnike na kartici Radnici."/>}
+            </div>
+          )}
+
+          {/* ── TERENI ── */}
+          {tab==='tereni'&&(
+            <div style={{ display:'flex', flexDirection:'column', gap:12 }}>
+              <Card style={{ padding:'14px 20px' }}>
+                <div style={{ display:'flex', alignItems:'center', gap:12 }}>
+                  <button onClick={prevMonth} style={{ background:'none', border:'1.5px solid #E9E5DE', borderRadius:10, padding:'7px 9px', cursor:'pointer', color:A2 }}><ChevronLeft size={16}/></button>
+                  <span style={{ fontFamily:MF, fontWeight:700, fontSize:16, color:A, flex:1, textAlign:'center' }}>{fmtM(month)}</span>
+                  <button onClick={nextMonth} style={{ background:'none', border:'1.5px solid #E9E5DE', borderRadius:10, padding:'7px 9px', cursor:'pointer', color:A2 }}><ChevronRight size={16}/></button>
+                </div>
+              </Card>
+
+              {employees.length===0
+                ? <Empty Icon={Users} text="Prvo dodaj radnike na kartici Radnici."/>
+                : (<>
+                <Card style={{ padding:22 }}>
+                  <p style={{ fontFamily:CF, fontStyle:'italic', color:A2, fontSize:16, marginBottom:14 }}>Novi teren — montaža</p>
+                  <TerenFields employees={employees} val={terenForm} set={setTerenForm} pRSD={pRSD()}/>
+                  <div style={{ marginTop:14 }}>
+                    <Btn onClick={addTeren}><Plus size={15}/> Sačuvaj teren</Btn>
+                  </div>
+                </Card>
+
+                {tereni.filter(t=>t.month===month).map(t=>{
+                  const isEd=editTeren?.id===t.id;
+                  const totSys=t.workers.reduce((a,w)=>a+(w.systems||0),0);
+                  return (
+                    <Card key={t.id} style={{ padding:18 }}>
+                      {isEd ? (
+                        <div>
+                          <TerenFields employees={employees} val={editTeren} set={setEditTeren} pRSD={pRSD()}/>
+                          <div style={{ display:'flex', gap:8, marginTop:14 }}>
+                            <Btn onClick={saveTeren} sm><Check size={14}/> Sačuvaj</Btn>
+                            <Btn v="ghost" onClick={()=>setEditTeren(null)} sm><X size={14}/> Otkaži</Btn>
+                          </div>
+                        </div>
+                      ) : (
+                        <div>
+                          <div style={{ display:'flex', alignItems:'flex-start', gap:12 }}>
+                            <div style={{ width:44, height:44, borderRadius:13, background:GL, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
+                              <MapPin size={18} color={GD}/>
+                            </div>
+                            <div style={{ flex:1, minWidth:0 }}>
+                              <p style={{ fontFamily:MF, fontWeight:800, fontSize:15, color:A, margin:'0 0 2px' }}>{t.location||'Teren'}</p>
+                              <p style={{ fontFamily:CF, fontStyle:'italic', fontSize:13, color:'#9CA3AF', margin:0 }}>{t.date?new Date(t.date).toLocaleDateString('sr-RS'):''} · {totSys} sistema</p>
+                            </div>
+                            <div style={{ display:'flex', gap:4, flexShrink:0 }}>
+                              <Btn v="ghost" sm onClick={()=>setEditTeren({ id:t.id, date:t.date, location:t.location, note:t.note, workers:t.workers.length?t.workers.map(w=>({eid:String(w.eid),systems:String(w.systems)})):[{eid:'',systems:''}] })} style={{ border:'none', padding:7 }}><Edit2 size={14} color={G}/></Btn>
+                              <Btn v="ghost" sm onClick={()=>delTeren(t.id)} style={{ border:'none', padding:7 }}><Trash2 size={14} color="#EF4444"/></Btn>
+                            </div>
+                          </div>
+                          <div style={{ display:'flex', flexWrap:'wrap', gap:6, marginTop:12 }}>
+                            {t.workers.map((w,i)=>(
+                              <Tag key={i} color="gold"><Layers size={11}/> {w.name||employees.find(e=>e.id===w.eid)?.name||'?'} · {w.systems} sist.</Tag>
+                            ))}
+                          </div>
+                          {t.note&&<p style={{ fontFamily:CF, fontStyle:'italic', fontSize:13, color:'#9CA3AF', margin:'10px 0 0' }}>{t.note}</p>}
+                        </div>
+                      )}
+                    </Card>
+                  );
+                })}
+                {tereni.filter(t=>t.month===month).length===0&&<Empty Icon={MapPin} text={`Nema terena za ${fmtM(month)}`}/>}
+              </>)}
             </div>
           )}
 
@@ -724,89 +881,40 @@ const ProhorecaApp = () => {
                 <p style={{ fontFamily:MF, fontWeight:600, fontSize:18, color:G, margin:'0 0 4px' }}>{fmtEur(totalMonth(month),eurRate)}</p>
                 <p style={{ fontFamily:CF, fontStyle:'italic', fontSize:12, color:`${G}60`, margin:0 }}>{appName} · {fmtM(month)}</p>
               </div>
-              <Card style={{ padding:22 }}>
-                <p style={{ fontFamily:CF, fontStyle:'italic', color:A2, fontSize:16, marginBottom:14 }}>Novi obračun — {fmtM(month)}</p>
-                <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(170px,1fr))', gap:12, marginBottom:14 }}>
-                  <SelEl label="Radnik" value={recForm.eid} onChange={e=>setRecForm({...recForm,eid:e.target.value})}>
-                    <option value="">Izaberi radnika...</option>
-                    {employees.filter(e=>!records.find(r=>r.eid===e.id&&r.month===month)).map(e=><option key={e.id} value={e.id}>{e.name}</option>)}
-                  </SelEl>
-                  <Field label={`Pergole (× ${fmt(pRSD())} RSD)`} type="number" value={recForm.numPergola} placeholder="0" onChange={e=>setRecForm({...recForm,numPergola:e.target.value})}/>
-                  <Field label="Napomena" type="text" value={recForm.note} placeholder="..." onChange={e=>setRecForm({...recForm,note:e.target.value})}/>
-                </div>
-                {selEmpForRec&&(
-                  <div style={{ background:GL, borderRadius:14, padding:'14px 18px', marginBottom:14 }}>
-                    {[
-                      ['Osnova plate',`${fmt(calcBase(selEmpForRec.id,month))} RSD`],
-                      (parseFloat(recForm.numPergola)||0)>0&&[`${recForm.numPergola}× pergola`,`+${fmt((parseFloat(recForm.numPergola)||0)*pRSD())} RSD`],
-                    ].filter(Boolean).map(([l,v])=>(
-                      <div key={l} style={{ display:'flex', justifyContent:'space-between', fontSize:13, color:GD, marginBottom:4 }}>
-                        <span style={{ fontFamily:CF, fontStyle:'italic' }}>{l}</span>
-                        <span style={{ fontFamily:MF, fontWeight:600 }}>{v}</span>
+              {employees.map(emp=>{
+                const total=calcTotal(emp.id,month); const paid=totalPaid(emp.id,month);
+                const[yr2,mo2]=month.split('-').map(Number); const m02=mo2-1;
+                const wdCnt=hasAtt(emp.id,month,attendance)?cntW(yr2,m02,emp.id,month,attendance):stdDays(yr2,m02);
+                const sdCnt=stdDays(yr2,m02);
+                const sys=terenSystems(emp.id,month);
+                const rec=records.find(r=>r.eid===emp.id&&r.month===month);
+                const manualP=(rec?.numPergola||0);
+                return (
+                  <Card key={emp.id} style={{ padding:18 }}>
+                    <div style={{ display:'flex', alignItems:'flex-start', gap:14 }}>
+                      <Avatar name={emp.name} sz={40}/>
+                      <div style={{ flex:1, minWidth:0 }}>
+                        <p style={{ fontFamily:MF, fontWeight:800, fontSize:15, color:A, margin:'0 0 6px' }}>{emp.name}</p>
+                        <div style={{ display:'flex', flexWrap:'wrap', gap:6 }}>
+                          <Tag color="gray">Osnova: {fmt(calcBase(emp.id,month))} RSD <span style={{ color:'#9CA3AF', fontWeight:400 }}>({wdCnt}/{sdCnt}d)</span></Tag>
+                          {sys>0&&<Tag color="gold"><MapPin size={11}/> {sys}× pergola = {fmt(sys*pRSD())} RSD</Tag>}
+                          {manualP>0&&<Tag color="gold">{manualP}× pergola (ručno) = {fmt(manualP*pRSD())} RSD</Tag>}
+                        </div>
+                        {paid>0&&<p style={{ fontFamily:MF, fontSize:11, color:'#3B82F6', margin:'6px 0 0', fontWeight:600 }}>Isplaćeno: {fmt(paid)} RSD · Ostatak: {fmt((total||0)-paid)} RSD</p>}
                       </div>
-                    ))}
-                    <Divider/>
-                    <div style={{ display:'flex', justifyContent:'space-between', marginTop:6 }}>
-                      <span style={{ fontFamily:MF, fontWeight:700, fontSize:13, color:A }}>Ukupno</span>
-                      <div style={{ textAlign:'right' }}>
-                        <div style={{ fontFamily:MF, fontWeight:800, fontSize:15, color:A }}>{fmt(previewTotal)} RSD</div>
-                        <div style={{ fontFamily:CF, fontStyle:'italic', fontSize:12, color:GD }}>{fmtEur(previewTotal,eurRate)}</div>
+                      <div style={{ display:'flex', flexDirection:'column', alignItems:'flex-end', gap:6, flexShrink:0 }}>
+                        <div style={{ textAlign:'right' }}>
+                          <div style={{ fontFamily:MF, fontWeight:800, fontSize:16, color:A }}>{fmt(total)} RSD</div>
+                          <div style={{ fontFamily:CF, fontStyle:'italic', fontSize:13, color:GD }}>{fmtEur(total,eurRate)}</div>
+                        </div>
+                        <Btn v="ghost" sm onClick={()=>genPayslipPDF(emp.id,month)} style={{ border:'none', padding:7 }}><FileText size={15} color={G}/> Listić</Btn>
                       </div>
                     </div>
-                  </div>
-                )}
-                <Btn onClick={addRec}><Plus size={15}/> Dodaj obračun</Btn>
-              </Card>
-              {monthRecs().map(rec=>{
-                const emp=employees.find(e=>e.id===rec.eid); const total=calcTotal(rec.eid,month); const paid=totalPaid(rec.eid,month);
-                const isEd=editRec?.id===rec.id;
-                const[yr2,mo2]=month.split('-').map(Number); const m02=mo2-1;
-                const wdCnt=hasAtt(rec.eid,month,attendance)?cntW(yr2,m02,rec.eid,month,attendance):stdDays(yr2,m02);
-                const sdCnt=stdDays(yr2,m02);
-                return (
-                  <Card key={rec.id} style={{ padding:18 }}>
-                    {isEd ? (
-                      <div>
-                        <p style={{ fontFamily:MF, fontWeight:700, fontSize:14, color:A, marginBottom:12 }}>{emp?.name}</p>
-                        <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(150px,1fr))', gap:10, marginBottom:12 }}>
-                          <Field label="Pergole" type="number" value={editRec.numPergola} onChange={e=>setEditRec(p=>({...p,numPergola:e.target.value}))}/>
-                          <Field label="Napomena" type="text" value={editRec.note} onChange={e=>setEditRec(p=>({...p,note:e.target.value}))}/>
-                        </div>
-                        <div style={{ display:'flex', gap:8 }}>
-                          <Btn onClick={saveRec} sm><Check size={14}/> Sačuvaj</Btn>
-                          <Btn v="ghost" onClick={()=>setEditRec(null)} sm><X size={14}/></Btn>
-                        </div>
-                      </div>
-                    ) : (
-                      <div style={{ display:'flex', alignItems:'flex-start', gap:14 }}>
-                        <Avatar name={emp?.name||''} sz={40}/>
-                        <div style={{ flex:1, minWidth:0 }}>
-                          <p style={{ fontFamily:MF, fontWeight:800, fontSize:15, color:A, margin:'0 0 6px' }}>{emp?.name}</p>
-                          <div style={{ display:'flex', flexWrap:'wrap', gap:6 }}>
-                            <Tag color="gray">Osnova: {fmt(calcBase(rec.eid,month))} RSD <span style={{ color:'#9CA3AF', fontWeight:400 }}>({wdCnt}/{sdCnt}d)</span></Tag>
-                            {rec.numPergola>0&&<Tag color="gold">{rec.numPergola}× pergola = {fmt(rec.numPergola*pRSD())} RSD</Tag>}
-                          </div>
-                          {rec.note&&<p style={{ fontFamily:CF, fontStyle:'italic', fontSize:13, color:'#9CA3AF', margin:'6px 0 0' }}>{rec.note}</p>}
-                          {paid>0&&<p style={{ fontFamily:MF, fontSize:11, color:'#3B82F6', margin:'4px 0 0', fontWeight:600 }}>Isplaćeno: {fmt(paid)} RSD · Ostatak: {fmt((total||0)-paid)} RSD</p>}
-                        </div>
-                        <div style={{ display:'flex', flexDirection:'column', alignItems:'flex-end', gap:6, flexShrink:0 }}>
-                          <div style={{ textAlign:'right' }}>
-                            <div style={{ fontFamily:MF, fontWeight:800, fontSize:16, color:A }}>{fmt(total)} RSD</div>
-                            <div style={{ fontFamily:CF, fontStyle:'italic', fontSize:13, color:GD }}>{fmtEur(total,eurRate)}</div>
-                          </div>
-                          <div style={{ display:'flex', gap:4 }}>
-                            <Btn v="ghost" sm onClick={()=>genPayslipPDF(rec.eid,month)} style={{ border:'none', padding:7 }}><FileText size={14} color={G}/></Btn>
-                            <Btn v="ghost" sm onClick={()=>setEditRec({id:rec.id,numDnevnica:String(rec.numDnevnica),numPergola:String(rec.numPergola),note:rec.note})} style={{ border:'none', padding:7 }}><Edit2 size={14} color={G}/></Btn>
-                            <Btn v="ghost" sm onClick={()=>delRec(rec.id)} style={{ border:'none', padding:7 }}><Trash2 size={14} color="#EF4444"/></Btn>
-                          </div>
-                        </div>
-                      </div>
-                    )}
                   </Card>
                 );
               })}
-              {monthRecs().length===0&&<Empty Icon={Calculator} text={`Nema obračuna za ${fmtM(month)}`}/>}
-              {monthRecs().length>0&&(
+              {employees.length===0&&<Empty Icon={Calculator} text="Dodaj radnike na kartici Radnici."/>}
+              {employees.length>0&&(
                 <div style={{ display:'flex', justifyContent:'center', paddingTop:8 }}>
                   <Btn onClick={genMonthPDF} v="dark"><Download size={17}/> Mesečni PDF izveštaj</Btn>
                 </div>
