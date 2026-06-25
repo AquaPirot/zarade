@@ -106,6 +106,14 @@ const hasAtt = (eid,ym,att) => Object.keys(att?.[eid]?.[ym]||{}).length>0;
 // Dnevnica za dati mesec = mesečna plata ÷ norma radnih dana
 const dnevnicaFor = (salary,y,m) => { const sd=stdDays(y,m); return sd>0 ? Math.round((salary||0)/sd) : 0; };
 
+// ── PDF helpers ─────────────────────────────────────────────────────────────────
+// jsPDF-ov standardni font ne podržava č/ć/đ ni strelice — transliterujemo u ASCII
+const DIA = { 'č':'c','ć':'c','ž':'z','š':'s','đ':'dj','Č':'C','Ć':'C','Ž':'Z','Š':'S','Đ':'Dj',
+  '→':'->','•':'-','’':"'",'‘':"'",'“':'"','”':'"' };
+const tx = (s) => String(s).replace(/[čćžšđČĆŽŠĐ→•’‘“”]/g, c => DIA[c] ?? c);
+// Patch: svaki doc.text(...) automatski prolazi kroz transliteraciju
+const patchPDF = (doc) => { const _t = doc.text.bind(doc); doc.text = (t,...r) => _t(typeof t==='string'?tx(t):t, ...r); return doc; };
+
 // ── UI Primitives ─────────────────────────────────────────────────────────────
 const s = (...rules) => Object.assign({}, ...rules);
 const cardS = { background:'#fff', borderRadius:20, border:'1px solid #EDE9E2', boxShadow:'0 1px 6px rgba(28,28,30,0.05)' };
@@ -546,7 +554,7 @@ const ProhorecaApp = () => {
   const genMonthPDF = async () => {
     try {
       const jsPDF=(await import('jspdf')).default;
-      const doc=new jsPDF(); const pw=doc.internal.pageSize.width; const mg=20; let y=28;
+      const doc=patchPDF(new jsPDF()); const pw=doc.internal.pageSize.width; const mg=20; let y=28;
       doc.setFontSize(16); doc.setFont(undefined,'bold');
       doc.text(`OBRACUN ZARADA — ${appName.toUpperCase()}`,pw/2,y,{align:'center'}); y+=8;
       doc.setFontSize(10); doc.setFont(undefined,'normal');
@@ -587,7 +595,7 @@ const ProhorecaApp = () => {
     const emp=employees.find(e=>e.id===eid); if(!emp) return;
     try {
       const jsPDF=(await import('jspdf')).default;
-      const doc=new jsPDF(); const pw=doc.internal.pageSize.width; const mg=20; let y=30;
+      const doc=patchPDF(new jsPDF()); const pw=doc.internal.pageSize.width; const mg=20; let y=30;
       doc.setFillColor(28,28,30); doc.rect(0,0,pw,50,'F');
       doc.setFontSize(18); doc.setFont(undefined,'bold'); doc.setTextColor(201,168,76); doc.text(appName,mg,22);
       doc.setFontSize(9); doc.setFont(undefined,'normal'); doc.setTextColor(180,180,180); doc.text('ISPLATNI LISTIC',mg,32);
@@ -630,58 +638,110 @@ const ProhorecaApp = () => {
   const genTereniPDF = async () => {
     try {
       const jsPDF=(await import('jspdf')).default;
-      const doc=new jsPDF(); const pw=doc.internal.pageSize.width; const mg=20; let y=28;
-      doc.setFontSize(16); doc.setFont(undefined,'bold');
-      doc.text(`IZVESTAJ TERENA — ${appName.toUpperCase()}`,pw/2,y,{align:'center'}); y+=8;
-      doc.setFontSize(10); doc.setFont(undefined,'normal');
-      doc.text(`${fmtM(month)} · ${new Date().toLocaleDateString('sr-RS')} · Bonus pergola: ${pergolaBonus} EUR`,pw/2,y,{align:'center'}); y+=14;
+      const doc=patchPDF(new jsPDF()); const pw=doc.internal.pageSize.width; const ph=doc.internal.pageSize.height; const mg=20; let y;
+      const R=(t,x,yy)=>doc.text(String(t),x,yy,{align:'right'});  // desno poravnat
       const mt=tereni.filter(t=>t.month===month);
+      const dateStr=new Date().toLocaleDateString('sr-RS');
+
+      // — zaglavlje (tamna traka, zlatni akcenat) —
+      const header=()=>{
+        doc.setFillColor(28,28,30); doc.rect(0,0,pw,42,'F');
+        doc.setFontSize(17); doc.setFont(undefined,'bold'); doc.setTextColor(201,168,76);
+        doc.text(appName,mg,20);
+        doc.setFontSize(9); doc.setFont(undefined,'normal'); doc.setTextColor(190,190,190);
+        doc.text('IZVESTAJ TERENA — MONTAZE',mg,30);
+        doc.setTextColor(255,255,255); doc.setFontSize(11); doc.setFont(undefined,'bold');
+        R(fmtM(month),pw-mg,20);
+        doc.setFontSize(8); doc.setFont(undefined,'normal'); doc.setTextColor(190,190,190);
+        R(`${dateStr} · pergola ${pergolaBonus} EUR`,pw-mg,29);
+      };
+      header(); y=56;
+
+      // kolone (desni rub vrednosti)
+      const cSys=118, cBon=152, cNak=pw-mg; // 190
+      const colHead=()=>{
+        doc.setFontSize(7.5); doc.setFont(undefined,'bold'); doc.setTextColor(150,150,150);
+        doc.text('RADNIK',mg+2,y);
+        R('SISTEMA',cSys,y); R('BONUS (RSD)',cBon,y); R('NAKNADA (RSD)',cNak,y);
+        y+=2; doc.setDrawColor(225,220,205); doc.setLineWidth(0.3); doc.line(mg,y,pw-mg,y); y+=5;
+      };
+      const ensure=(need)=>{ if(y+need>ph-18){ doc.addPage(); header(); y=56; } };
+
       if(mt.length===0){
-        doc.setFontSize(11); doc.setTextColor(150,150,150);
-        doc.text(`Nema evidentiranih terena za ${fmtM(month)}.`,pw/2,y,{align:'center'});
+        doc.setFontSize(11); doc.setTextColor(150,150,150); doc.setFont(undefined,'normal');
+        doc.text(`Nema evidentiranih terena za ${fmtM(month)}.`,pw/2,y+10,{align:'center'});
       } else {
         mt.forEach((t,idx)=>{
-          if(y>230){doc.addPage();y=24;}
+          ensure(26);
           const totSys=t.workers.reduce((a,w)=>a+(w.systems||0),0);
-          doc.setFontSize(11); doc.setFont(undefined,'bold'); doc.setTextColor(28,28,30);
-          doc.text(`${idx+1}.  ${t.location||'Teren'}`,mg,y);
-          doc.setFontSize(9); doc.setFont(undefined,'normal'); doc.setTextColor(100,100,100);
-          doc.text(t.date?new Date(t.date).toLocaleDateString('sr-RS'):'',pw-mg,y,{align:'right'}); y+=6;
-          doc.setFontSize(9); doc.setTextColor(70,70,70);
-          doc.text(`Ukupno sistema: ${totSys}  ·  Bonus: ${fmt(totSys*pRSD())} RSD`,mg+4,y); y+=5;
+          // naslov terena
+          doc.setFillColor(243,234,200); doc.roundedRect(mg,y-5,pw-2*mg,9,2,2,'F');
+          doc.setFontSize(11); doc.setFont(undefined,'bold'); doc.setTextColor(122,92,30);
+          doc.text(`${idx+1}.  ${t.location||'Teren'}`,mg+2,y+1);
+          doc.setFontSize(9); doc.setFont(undefined,'normal'); doc.setTextColor(122,92,30);
+          R(t.date?new Date(t.date).toLocaleDateString('sr-RS'):'',pw-mg-2,y+1);
+          y+=10;
+          colHead();
+          // redovi radnika
           t.workers.forEach(w=>{
-            if(y>260){doc.addPage();y=24;}
+            ensure(7);
             const emp=employees.find(e=>e.id===w.eid);
             const naknada=emp?.terenNaknada||0;
-            doc.setTextColor(40,40,40);
-            doc.text(`  ${emp?.name||w.name||'?'}`,mg+4,y);
-            doc.text(`${w.systems} sist. → ${fmt(w.systems*pRSD())} RSD${naknada>0?`  +  naknada ${fmt(naknada)} RSD`:''}`,mg+72,y); y+=5;
+            doc.setFontSize(9.5); doc.setFont(undefined,'normal'); doc.setTextColor(40,40,40);
+            doc.text(emp?.name||w.name||'?',mg+2,y);
+            R(`${w.systems}`,cSys,y);
+            R(fmt(w.systems*pRSD()),cBon,y);
+            R(naknada>0?fmt(naknada):'—',cNak,y);
+            y+=6;
           });
-          if(t.note){doc.setFontSize(8);doc.setTextColor(140,140,140);doc.text(`  Napomena: ${t.note}`,mg+4,y);y+=5;doc.setFontSize(9);}
-          y+=4; doc.setDrawColor(220,215,200); doc.line(mg,y-2,pw-mg,y-2); y+=4;
+          // suma terena
+          doc.setDrawColor(225,220,205); doc.setLineWidth(0.3); doc.line(mg,y-2,pw-mg,y-2);
+          doc.setFontSize(9); doc.setFont(undefined,'bold'); doc.setTextColor(28,28,30);
+          doc.text('Ukupno na terenu',mg+2,y+2);
+          R(`${totSys}`,cSys,y+2); R(fmt(totSys*pRSD()),cBon,y+2);
+          y+=8;
+          if(t.note){ ensure(6); doc.setFontSize(8); doc.setFont(undefined,'italic'); doc.setTextColor(150,150,150); doc.text(`Napomena: ${t.note}`,mg+2,y); doc.setFont(undefined,'normal'); y+=6; }
+          y+=4;
         });
-        if(y>220){doc.addPage();y=24;}
-        y+=4;
-        doc.setFontSize(12); doc.setFont(undefined,'bold'); doc.setTextColor(0,0,0);
-        doc.text('REZIME PO RADNIKU',mg,y); y+=4;
-        doc.setDrawColor(201,168,76); doc.setLineWidth(0.7); doc.line(mg,y,pw-mg,y); doc.setLineWidth(0.2); y+=8;
+
+        // — REZIME PO RADNIKU —
+        ensure(30);
+        y+=2;
+        doc.setFontSize(12); doc.setFont(undefined,'bold'); doc.setTextColor(28,28,30);
+        doc.text('REZIME PO RADNIKU',mg,y); y+=3;
+        doc.setDrawColor(201,168,76); doc.setLineWidth(0.7); doc.line(mg,y,pw-mg,y); doc.setLineWidth(0.2); y+=6;
+        // zaglavlje rezime tabele
+        const sTer=92, sSys=116, sBon=150, sNak=174, sTot=pw-mg;
+        doc.setFontSize(7.5); doc.setFont(undefined,'bold'); doc.setTextColor(150,150,150);
+        doc.text('RADNIK',mg+2,y);
+        R('TERENI',sTer,y); R('SIST.',sSys,y); R('BONUS',sBon,y); R('NAKNADA',sNak,y); R('UKUPNO',sTot,y);
+        y+=2; doc.setDrawColor(225,220,205); doc.line(mg,y,pw-mg,y); y+=5;
+        let gSys=0,gBon=0,gNak=0,gTot=0;
         employees.forEach(emp=>{
           const visits=terenVisits(emp.id,month);
           if(!visits) return;
-          if(y>260){doc.addPage();y=24;}
+          ensure(7);
           const sys=terenSystems(emp.id,month);
           const naknada=visits*(emp.terenNaknada||0);
           const sysBonus=sys*pRSD();
-          doc.setFontSize(10); doc.setFont(undefined,'bold'); doc.setTextColor(28,28,30);
-          doc.text(emp.name,mg,y);
-          doc.setFont(undefined,'normal'); doc.setFontSize(9); doc.setTextColor(80,80,80);
-          doc.text(`${visits} teren${visits>1?'a':''}  ·  ${sys} sistema → ${fmt(sysBonus)} RSD${naknada>0?`  ·  naknada ${fmt(naknada)} RSD`:''}`,mg+58,y); y+=5;
-          doc.setFont(undefined,'bold'); doc.setTextColor(0,110,0);
-          doc.text(`Ukupno: ${fmt(sysBonus+naknada)} RSD`,mg+4,y); y+=8; doc.setTextColor(0,0,0);
+          const tot=sysBonus+naknada;
+          gSys+=sys; gBon+=sysBonus; gNak+=naknada; gTot+=tot;
+          doc.setFontSize(9.5); doc.setFont(undefined,'bold'); doc.setTextColor(28,28,30);
+          doc.text(emp.name,mg+2,y);
+          doc.setFont(undefined,'normal'); doc.setTextColor(70,70,70);
+          R(`${visits}`,sTer,y); R(`${sys}`,sSys,y); R(fmt(sysBonus),sBon,y); R(naknada>0?fmt(naknada):'—',sNak,y);
+          doc.setFont(undefined,'bold'); doc.setTextColor(0,110,0); R(fmt(tot),sTot,y);
+          y+=6;
         });
+        // ukupan red
+        doc.setDrawColor(201,168,76); doc.setLineWidth(0.5); doc.line(mg,y-1,pw-mg,y-1); y+=4;
+        doc.setFontSize(9.5); doc.setFont(undefined,'bold'); doc.setTextColor(28,28,30);
+        doc.text('SVE UKUPNO',mg+2,y);
+        R(`${gSys}`,sSys,y); R(fmt(gBon),sBon,y); R(gNak>0?fmt(gNak):'—',sNak,y);
+        doc.setTextColor(0,110,0); R(fmt(gTot),sTot,y);
       }
       const pgs=doc.internal.getNumberOfPages();
-      for(let i=1;i<=pgs;i++){doc.setPage(i);doc.setFontSize(8);doc.setTextColor(160,160,160);doc.text('by AG GROUP',pw/2,doc.internal.pageSize.height-10,{align:'center'});doc.text(`${i}/${pgs}`,pw-mg,doc.internal.pageSize.height-10,{align:'right'});}
+      for(let i=1;i<=pgs;i++){doc.setPage(i);doc.setFontSize(8);doc.setTextColor(160,160,160);doc.setFont(undefined,'normal');doc.text('by AG GROUP',pw/2,ph-10,{align:'center'});R(`${i}/${pgs}`,pw-mg,ph-10);}
       doc.save(`${appName}_Tereni_${month}.pdf`);
     } catch(err){console.error(err);}
   };
