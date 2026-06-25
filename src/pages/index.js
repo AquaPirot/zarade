@@ -81,13 +81,21 @@ const fo     = (y,m) => (new Date(y,m,1).getDay()+6)%7;
 const dw     = (y,m,d) => new Date(y,m,d).getDay();
 const isSu   = (y,m,d) => dw(y,m,d)===0;
 const isSa   = (y,m,d) => dw(y,m,d)===6;
-const stdDays = (y,m) => { let c=0; for(let d=1;d<=dim(y,m);d++){ const w=dw(y,m,d); if(w>=1&&w<=5)c++; } return c; };
-const effW   = (y,m,d,dd) => { if(isSu(y,m,d))return false; if(dd?.state==='worked')return true; if(dd?.state==='off')return false; return!isSa(y,m,d); };
+// Broj slobodnih subota mesečno (u okviru plate)
+const FREE_SAT = 2;
+// Standardni radni dani (norma) = pon–pet + (sve subote − 2 slobodne). Nedelja se ne računa u normu.
+const stdDays = (y,m) => {
+  let wd=0, sat=0;
+  for(let d=1;d<=dim(y,m);d++){ const w=dw(y,m,d); if(w>=1&&w<=5)wd++; else if(w===6)sat++; }
+  return wd + Math.max(0, sat-FREE_SAT);
+};
+// Efektivan radni dan: 'worked' uvek radi, 'off' uvek slobodan;
+// podrazumevano pon–pet rade, subota i nedelja slobodne.
+const effW   = (y,m,d,dd) => { if(dd?.state==='worked')return true; if(dd?.state==='off')return false; return !isSu(y,m,d) && !isSa(y,m,d); };
 const cntW   = (y,m,eid,ym,att) => { let c=0; for(let d=1;d<=dim(y,m);d++) if(effW(y,m,d,att?.[eid]?.[ym]?.[d]))c++; return c; };
-// Efektivni dani za platu: subote su u okviru plate (ne dižu je), ali nadoknađuju
-// propuštene radne dane → broj odrađenih ograničen na standardne radne dane (pon–pet).
-const effDays = (y,m,eid,ym,att) => Math.min(cntW(y,m,eid,ym,att), stdDays(y,m));
 const hasAtt = (eid,ym,att) => Object.keys(att?.[eid]?.[ym]||{}).length>0;
+// Dnevnica za dati mesec = mesečna plata ÷ norma radnih dana
+const dnevnicaFor = (salary,y,m) => { const sd=stdDays(y,m); return sd>0 ? Math.round((salary||0)/sd) : 0; };
 
 // ── UI Primitives ─────────────────────────────────────────────────────────────
 const s = (...rules) => Object.assign({}, ...rules);
@@ -198,7 +206,18 @@ const MonthCalendar = ({ eid, month, att, onUpdate }) => {
   const total=dim(y,m0), offset=fo(y,m0);
   const empAtt=att?.[eid]?.[month]||{};
   const cells=[...Array(offset).fill(null), ...Array.from({length:total},(_,i)=>i+1)];
-  const toggle=(d)=>{ if(isSu(y,m0,d))return; const cur=empAtt[d]; const next=cur?.state==='worked'?'off':cur?.state==='off'?null:'worked'; onUpdate(eid,month,d,{...cur,state:next}); };
+  // Klik prebacuje između "radi" i "slobodan" (2 stanja):
+  //  • pon–pet: podrazumevano rade → klik = slobodan, pa nazad
+  //  • subota/nedelja: podrazumevano slobodne → klik = radi, pa nazad
+  const toggle=(d)=>{
+    const cur=empAtt[d];
+    const wknd=isSu(y,m0,d)||isSa(y,m0,d);
+    const worked=effW(y,m0,d,cur);
+    const next=worked?'off':'worked';
+    // ako vraćamo na podrazumevano stanje, čistimo state (null)
+    const isDefault=(next==='worked'&&!wknd)||(next==='off'&&wknd);
+    onUpdate(eid,month,d,{...cur,state:isDefault?null:next});
+  };
   const today=new Date(); const isToday=(d)=>today.getFullYear()===y&&today.getMonth()===m0&&today.getDate()===d;
   const openNote=(e,d)=>{ e.stopPropagation(); setNoteDay(d); setNoteVal(empAtt[d]?.note||''); };
   const saveNote=()=>{ onUpdate(eid,month,noteDay,{...empAtt[noteDay],note:noteVal}); setNoteDay(null); };
@@ -206,23 +225,24 @@ const MonthCalendar = ({ eid, month, att, onUpdate }) => {
   return (
     <div>
       <div style={{ display:'grid', gridTemplateColumns:'repeat(7,1fr)', gap:4, marginBottom:5 }}>
-        {DAYS.map((d,i)=><div key={d} style={{ textAlign:'center', fontFamily:MF, fontWeight:700, fontSize:10, letterSpacing:'0.05em', color:i===6?'#D6D0C4':i===5?G:'#A8A29E' }}>{d}</div>)}
+        {DAYS.map((d,i)=><div key={d} style={{ textAlign:'center', fontFamily:MF, fontWeight:700, fontSize:10, letterSpacing:'0.05em', color:i===6?'#D6D0C4':'#A8A29E' }}>{d}</div>)}
       </div>
       <div style={{ display:'grid', gridTemplateColumns:'repeat(7,1fr)', gap:4 }}>
         {cells.map((d,i)=>{
           if(!d) return <div key={`e${i}`}/>;
-          const dd=empAtt[d]; const su=isSu(y,m0,d),sa=isSa(y,m0,d);
-          const worked=effW(y,m0,d,dd); const override=dd?.state!=null; const hasNote=!!dd?.note; const td=isToday(d);
+          const dd=empAtt[d]; const wknd=isSu(y,m0,d)||isSa(y,m0,d);
+          const worked=effW(y,m0,d,dd); const hasNote=!!dd?.note; const td=isToday(d);
+          const extra=worked&&wknd; // radna subota/nedelja = dodatni dan (van norme)
           let bg,fg,border;
-          if(su){ bg='#F8F7F4'; fg='#D6D0C4'; border='#EFECE6'; }
-          else if(worked){ bg=override?G:GL; fg=override?'#fff':GD; border=override?G:'#E0D09E'; }
-          else{ bg=override?'#F3F4F6':(sa?'#FAFAF9':'#F5F3EF'); fg=override?'#9CA3AF':'#C8C4BC'; border=override?'#E5E7EB':'#ECEAE5'; }
+          if(extra){       bg=G;        fg='#fff';    border=G; }          // radni vikend — istaknut zlatni
+          else if(worked){ bg=GL;       fg=GD;        border='#E0D09E'; }  // radni dan (pon–pet)
+          else{            bg='#F3F4F6'; fg='#9CA3AF'; border='#E5E7EB'; } // slobodan
           return (
             <div key={d} onClick={()=>toggle(d)}
-              style={{ background:bg, border:`${td?2:1.5}px solid ${td?G:border}`, borderRadius:11, minHeight:46, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', cursor:su?'default':'pointer', position:'relative', transition:'all .15s', gap:2 }}>
+              style={{ background:bg, border:`${td?2:1.5}px solid ${td?G:border}`, borderRadius:11, minHeight:46, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', cursor:'pointer', position:'relative', transition:'all .15s', gap:2 }}>
               <span style={{ fontFamily:MF, fontWeight:700, fontSize:13, color:fg }}>{d}</span>
-              {hasNote&&<div style={{ width:5, height:5, borderRadius:'50%', background:G, position:'absolute', top:4, right:5 }}/>}
-              {!su&&<button title="Napomena" onClick={e=>openNote(e,d)} style={{ position:'absolute', bottom:3, right:4, background:'none', border:'none', cursor:'pointer', color:fg, fontSize:9, opacity:0.55, lineHeight:1 }}>✎</button>}
+              {hasNote&&<div style={{ width:5, height:5, borderRadius:'50%', background:extra?'#fff':G, position:'absolute', top:4, right:5 }}/>}
+              <button title="Napomena" onClick={e=>openNote(e,d)} style={{ position:'absolute', bottom:3, right:4, background:'none', border:'none', cursor:'pointer', color:fg, fontSize:9, opacity:0.55, lineHeight:1 }}>✎</button>
             </div>
           );
         })}
@@ -333,19 +353,21 @@ const ProhorecaApp = () => {
 
   // ── Calculations ──
   const pRSD = () => (pergolaBonus||10)*(eurRate||117.5);
+  // Osnova = dnevnica(mesec) × odrađeni dani. Bez kalendara = puna plata.
   const calcBase = (eid,m) => {
     const emp=employees.find(e=>e.id===eid);
     if(!emp) return 0;
     if(!hasAtt(eid,m,attendance)) return emp.agreedSalary||0;
     const[y,mo]=m.split('-').map(Number); const m0=mo-1;
-    const sd=stdDays(y,m0), wd=effDays(y,m0,eid,m,attendance);
-    return sd>0 ? Math.round((emp.agreedSalary||0)*wd/sd) : (emp.agreedSalary||0);
+    const sd=stdDays(y,m0); if(sd<=0) return emp.agreedSalary||0;
+    const wd=cntW(y,m0,eid,m,attendance);
+    return Math.round((emp.agreedSalary||0)*wd/sd);
   };
+  // Dodaci = pergole (dnevnice/dodatni dani sada idu preko kalendara, ne ručno)
   const calcExtras = (eid,m) => {
-    const emp=employees.find(e=>e.id===eid);
     const rec=records.find(r=>r.eid===eid&&r.month===m);
-    if(!emp||!rec) return 0;
-    return (rec.numDnevnica||0)*(emp.dnevnica||0)+(rec.numPergola||0)*pRSD();
+    if(!rec) return 0;
+    return (rec.numPergola||0)*pRSD();
   };
   const calcTotal    = (eid,m) => { const emp=employees.find(e=>e.id===eid); if(!emp)return null; return calcBase(eid,m)+calcExtras(eid,m); };
   const totalMonth   = (m) => employees.reduce((s,e)=>s+Math.max(0,calcTotal(e.id,m)??0),0);
@@ -444,15 +466,14 @@ const ProhorecaApp = () => {
       employees.forEach(emp=>{
         if(y>255){doc.addPage();y=24;}
         const[yr,mo]=month.split('-').map(Number); const m0=mo-1;
-        const sd=stdDays(yr,m0); const wd=hasAtt(emp.id,month,attendance)?effDays(yr,m0,emp.id,month,attendance):sd;
+        const sd=stdDays(yr,m0); const wd=hasAtt(emp.id,month,attendance)?cntW(yr,m0,emp.id,month,attendance):sd;
         const base=calcBase(emp.id,month);
         const rec=records.find(r=>r.eid===emp.id&&r.month===month);
         const total=calcTotal(emp.id,month);
         doc.setFontSize(11); doc.setFont(undefined,'bold'); doc.text(emp.name,mg,y); y+=7;
         doc.setFontSize(9); doc.setFont(undefined,'normal');
-        doc.text(`Plata: ${fmt(emp.agreedSalary)} RSD · Dnevnica: ${fmt(emp.dnevnica)} RSD`,mg+4,y); y+=5;
+        doc.text(`Plata: ${fmt(emp.agreedSalary)} RSD · Dnevnica: ${fmt(dnevnicaFor(emp.agreedSalary,yr,m0))} RSD`,mg+4,y); y+=5;
         doc.text(`Prisustvo: ${wd}/${sd} dana · Osnova: ${fmt(base)} RSD`,mg+4,y); y+=5;
-        if(rec?.numDnevnica>0){doc.setTextColor(0,100,0);doc.text(`Dnevnice: ${rec.numDnevnica}x ${fmt(emp.dnevnica)} = ${fmt(rec.numDnevnica*emp.dnevnica)} RSD`,mg+4,y);y+=5;doc.setTextColor(0,0,0);}
         if(rec?.numPergola>0){doc.setTextColor(0,100,0);doc.text(`Pergole: ${rec.numPergola}x ${fmt(pRSD())} = ${fmt(rec.numPergola*pRSD())} RSD`,mg+4,y);y+=5;doc.setTextColor(0,0,0);}
         doc.setFont(undefined,'bold'); doc.setTextColor(0,110,0);
         doc.text(`GOTOVINA: ${fmt(total)} RSD (${fmtEur(total,eurRate)})`,mg+4,y); y+=5;
@@ -480,17 +501,16 @@ const ProhorecaApp = () => {
       y=65;
       doc.setTextColor(0,0,0); doc.setFontSize(14); doc.setFont(undefined,'bold'); doc.text(emp.name,mg,y); y+=8;
       doc.setFontSize(9); doc.setFont(undefined,'normal'); doc.setTextColor(100,100,100);
-      doc.text(`Ugovorena mesecna plata: ${fmt(emp.agreedSalary)} RSD`,mg,y); y+=5;
-      doc.text(`Ugovorena dnevnica: ${fmt(emp.dnevnica)} RSD`,mg,y); y+=14;
       const[yr,mo]=m.split('-').map(Number); const m0=mo-1;
-      const sd=stdDays(yr,m0), wd=hasAtt(eid,m,attendance)?effDays(yr,m0,eid,m,attendance):sd;
+      const sd=stdDays(yr,m0), wd=hasAtt(eid,m,attendance)?cntW(yr,m0,eid,m,attendance):sd;
+      doc.text(`Ugovorena mesecna plata: ${fmt(emp.agreedSalary)} RSD`,mg,y); y+=5;
+      doc.text(`Dnevnica (${fmtM(m)}): ${fmt(dnevnicaFor(emp.agreedSalary,yr,m0))} RSD  (${sd} radnih dana)`,mg,y); y+=14;
       const base=calcBase(eid,m);
       const rec=records.find(r=>r.eid===eid&&r.month===m);
       const drawRow=(label,value,color)=>{ if(color)doc.setTextColor(...color);else doc.setTextColor(30,30,30); doc.setFontSize(10); doc.setFont(undefined,'normal'); doc.text(label,mg,y); doc.setFont(undefined,'bold'); doc.text(value,pw-mg,y,{align:'right'}); y+=8; doc.setTextColor(30,30,30); };
       doc.setFontSize(9); doc.setTextColor(120,120,120); doc.text('OBRACUN',mg,y); y+=5;
       doc.setDrawColor(220,215,200); doc.line(mg,y,pw-mg,y); y+=5;
       drawRow(`Osnovna plata (${wd}/${sd} dana)`,`${fmt(base)} RSD`);
-      if(rec?.numDnevnica>0) drawRow(`Dnevnice: ${rec.numDnevnica}x ${fmt(emp.dnevnica)} RSD`,`${fmt(rec.numDnevnica*emp.dnevnica)} RSD`,[0,110,0]);
       if(rec?.numPergola>0) drawRow(`Pergole: ${rec.numPergola}x ${fmt(pRSD())} RSD`,`${fmt(rec.numPergola*pRSD())} RSD`,[0,110,0]);
       const notes=Object.entries(attendance[eid]?.[m]||{}).filter(([,dd])=>dd?.note);
       if(notes.length>0){ y+=4; doc.setFontSize(9); doc.setTextColor(120,120,120); doc.text('NAPOMENE',mg,y); y+=5; doc.line(mg,y,pw-mg,y); y+=5; notes.sort(([a],[b])=>+a-+b).forEach(([d,dd])=>{ doc.setFontSize(9); doc.setTextColor(100,90,0); doc.text(`${d}.  ${dd.note}`,mg+4,y); y+=6; }); }
@@ -513,13 +533,13 @@ const ProhorecaApp = () => {
   const monthPays  = () => payments.filter(p=>p.month===month);
   const selEmpForRec = employees.find(e=>e.id===parseInt(recForm.eid));
   const previewTotal = selEmpForRec
-    ? calcBase(selEmpForRec.id,month)+(parseFloat(recForm.numDnevnica)||0)*(selEmpForRec.dnevnica||0)+(parseFloat(recForm.numPergola)||0)*pRSD()
+    ? calcBase(selEmpForRec.id,month)+(parseFloat(recForm.numPergola)||0)*pRSD()
     : null;
   const attEmpObj  = employees.find(e=>e.id===attEmp);
   const [attY,attMo0] = attEmpObj ? month.split('-').map((n,i)=>i===0?+n:+n-1) : [0,0];
-  const attStd = attEmpObj ? stdDays(attY,attMo0) : 0;
-  const attWkd = attEmpObj ? cntW(attY,attMo0,attEmpObj.id,month,attendance) : 0;
-  const attEff = attEmpObj ? Math.min(attWkd,attStd) : 0;
+  const attStd = attEmpObj ? stdDays(attY,attMo0) : 0;  // norma radnih dana (pon–pet + subote−2)
+  const attHas = attEmpObj ? hasAtt(attEmpObj.id,month,attendance) : false;
+  const attWkd = attEmpObj ? (attHas ? cntW(attY,attMo0,attEmpObj.id,month,attendance) : attStd) : 0;  // odrađeni
   const prevMonth=()=>{ const d=new Date(`${month}-01`); d.setMonth(d.getMonth()-1); setMonth(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`); };
   const nextMonth=()=>{ const d=new Date(`${month}-01`); d.setMonth(d.getMonth()+1); setMonth(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`); };
 
@@ -587,8 +607,8 @@ const ProhorecaApp = () => {
                 <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(180px,1fr))', gap:12, marginBottom:14 }}>
                   <Field label="Ime i prezime" type="text" placeholder="npr. Marko Marković" value={newEmp.name} onChange={e=>setNewEmp({...newEmp,name:e.target.value})} onKeyDown={e=>e.key==='Enter'&&addEmp()}/>
                   <Field label="Mesečna plata (RSD)" type="number" placeholder="0" value={newEmp.agreedSalary} onChange={e=>setNewEmp({...newEmp,agreedSalary:e.target.value})} onKeyDown={e=>e.key==='Enter'&&addEmp()}/>
-                  <Field label="Dnevnica (RSD)" type="number" placeholder="0" value={newEmp.dnevnica} onChange={e=>setNewEmp({...newEmp,dnevnica:e.target.value})} onKeyDown={e=>e.key==='Enter'&&addEmp()}/>
                 </div>
+                <p style={{ fontFamily:CF, fontStyle:'italic', fontSize:13, color:'#A8A29E', margin:'0 0 14px' }}>Dnevnica se računa automatski (plata ÷ radni dani u mesecu).</p>
                 <Btn onClick={addEmp}><Plus size={15}/> Dodaj radnika</Btn>
               </Card>
               {employees.map(emp=>(
@@ -598,7 +618,6 @@ const ProhorecaApp = () => {
                       <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(160px,1fr))', gap:10, marginBottom:12 }}>
                         <Field label="Ime i prezime" type="text" value={editEmp.name} onChange={e=>setEditEmp(p=>({...p,name:e.target.value}))}/>
                         <Field label="Mesečna plata" type="number" value={editEmp.agreedSalary} onChange={e=>setEditEmp(p=>({...p,agreedSalary:e.target.value}))}/>
-                        <Field label="Dnevnica" type="number" value={editEmp.dnevnica} onChange={e=>setEditEmp(p=>({...p,dnevnica:e.target.value}))}/>
                       </div>
                       <div style={{ display:'flex', gap:8 }}>
                         <Btn onClick={saveEmp} sm><Check size={14}/> Sačuvaj</Btn>
@@ -612,7 +631,7 @@ const ProhorecaApp = () => {
                         <p style={{ fontFamily:MF, fontWeight:800, fontSize:15, color:A, margin:'0 0 4px' }}>{emp.name}</p>
                         <div style={{ display:'flex', gap:12, flexWrap:'wrap' }}>
                           <span style={{ fontFamily:CF, fontStyle:'italic', fontSize:13, color:'#78716C' }}>Plata: <strong style={{ color:A2, fontFamily:MF, fontStyle:'normal' }}>{fmt(emp.agreedSalary)} RSD</strong></span>
-                          <span style={{ fontFamily:CF, fontStyle:'italic', fontSize:13, color:'#78716C' }}>Dnevnica: <strong style={{ color:A2, fontFamily:MF, fontStyle:'normal' }}>{fmt(emp.dnevnica)} RSD</strong></span>
+                          <span style={{ fontFamily:CF, fontStyle:'italic', fontSize:13, color:'#78716C' }}>Dnevnica ({fmtM(month).split(' ')[0].toLowerCase()}): <strong style={{ color:G, fontFamily:MF, fontStyle:'normal' }}>{fmt(dnevnicaFor(emp.agreedSalary,...month.split('-').map((n,i)=>i===0?+n:+n-1)))} RSD</strong></span>
                         </div>
                       </div>
                       <div style={{ display:'flex', gap:4 }}>
@@ -644,9 +663,9 @@ const ProhorecaApp = () => {
               {attEmpObj&&(<>
                 <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:10 }}>
                   {[
-                    {l:'Radnih dana',v:`${attStd}`,sub:'standard (pon–pet)'},
-                    {l:'Odrađeno',v:`${attWkd}`,sub:attWkd>attStd?`${attStd} + ${attWkd-attStd} sub.`:`od ${attStd} dana`},
-                    {l:'Osnova plate',v:`${fmt(calcBase(attEmpObj.id,month))} RSD`,sub:attEff<attStd?`pro-rata ${attEff}/${attStd}`:'puna plata'},
+                    {l:'Norma dana',v:`${attStd}`,sub:'pon–pet + subote −2'},
+                    {l:'Odrađeno',v:`${attWkd}`,sub:attWkd>attStd?`+${attWkd-attStd} dodatnih`:attWkd<attStd?`${attStd-attWkd} manje`:'po normi'},
+                    {l:'Osnova plate',v:`${fmt(calcBase(attEmpObj.id,month))} RSD`,sub:attWkd>attStd?'iznad pune':attWkd<attStd?`pro-rata ${attWkd}/${attStd}`:'puna plata'},
                   ].map(({l,v,sub})=>(
                     <Card key={l} style={{ padding:'14px 16px', textAlign:'center' }}>
                       <p style={{ fontFamily:MF, fontWeight:700, fontSize:10, color:'#9CA3AF', letterSpacing:'0.07em', marginBottom:4 }}>{l.toUpperCase()}</p>
@@ -664,8 +683,20 @@ const ProhorecaApp = () => {
                     </div>
                   </div>
                   <MonthCalendar eid={attEmpObj.id} month={month} att={attendance} onUpdate={updAtt}/>
-                  <p style={{ fontFamily:CF, fontStyle:'italic', fontSize:12.5, color:'#A8A29E', margin:'14px 0 0', lineHeight:1.5, borderTop:'1px solid #F0EDE7', paddingTop:12 }}>
-                    Subota je u okviru ugovorene plate — radna subota <strong style={{ fontFamily:MF, fontStyle:'normal', color:GD, fontWeight:600 }}>ne povećava</strong> platu, ali nadoknađuje propušteni radni dan (pon–pet). Plata se smanjuje samo ako je odrađeno manje od {attStd} standardnih radnih dana.
+                  <div style={{ display:'flex', gap:14, flexWrap:'wrap', margin:'14px 0 0', paddingTop:12, borderTop:'1px solid #F0EDE7' }}>
+                    {[
+                      {c:GL,   b:'#E0D09E', t:'Radni dan (pon–pet)'},
+                      {c:G,    b:G,         t:'Radni vikend — dodatni dan'},
+                      {c:'#F3F4F6', b:'#E5E7EB', t:'Slobodan'},
+                    ].map(({c,b,t})=>(
+                      <span key={t} style={{ display:'inline-flex', alignItems:'center', gap:7, fontFamily:MF, fontSize:11.5, color:'#78716C', fontWeight:600 }}>
+                        <span style={{ width:15, height:15, borderRadius:5, background:c, border:`1.5px solid ${b}` }}/>{t}
+                      </span>
+                    ))}
+                  </div>
+                  <p style={{ fontFamily:CF, fontStyle:'italic', fontSize:12.5, color:'#A8A29E', margin:'10px 0 0', lineHeight:1.5 }}>
+                    Dnevnica = mesečna plata ÷ {attStd} radnih dana = <strong style={{ fontFamily:MF, fontStyle:'normal', color:GD, fontWeight:600 }}>{fmt(dnevnicaFor(attEmpObj.agreedSalary,attY,attMo0))} RSD</strong>.
+                    Pon–pet su podrazumevano radni; klikni subotu/nedelju da je označiš kao <strong style={{ fontFamily:MF, fontStyle:'normal', color:GD, fontWeight:600 }}>radnu</strong> (dodatni dan), a radni dan da ga označiš kao slobodan. Svaki radni dan = +1 dnevnica.
                   </p>
                 </Card>
                 <div style={{ display:'flex', justifyContent:'center' }}>
@@ -700,7 +731,6 @@ const ProhorecaApp = () => {
                     <option value="">Izaberi radnika...</option>
                     {employees.filter(e=>!records.find(r=>r.eid===e.id&&r.month===month)).map(e=><option key={e.id} value={e.id}>{e.name}</option>)}
                   </SelEl>
-                  <Field label={selEmpForRec?`Dnevnice (× ${fmt(selEmpForRec.dnevnica)} RSD)`:'Broj dnevnica'} type="number" value={recForm.numDnevnica} placeholder="0" onChange={e=>setRecForm({...recForm,numDnevnica:e.target.value})}/>
                   <Field label={`Pergole (× ${fmt(pRSD())} RSD)`} type="number" value={recForm.numPergola} placeholder="0" onChange={e=>setRecForm({...recForm,numPergola:e.target.value})}/>
                   <Field label="Napomena" type="text" value={recForm.note} placeholder="..." onChange={e=>setRecForm({...recForm,note:e.target.value})}/>
                 </div>
@@ -708,7 +738,6 @@ const ProhorecaApp = () => {
                   <div style={{ background:GL, borderRadius:14, padding:'14px 18px', marginBottom:14 }}>
                     {[
                       ['Osnova plate',`${fmt(calcBase(selEmpForRec.id,month))} RSD`],
-                      (parseFloat(recForm.numDnevnica)||0)>0&&[`${recForm.numDnevnica}× dnevnica`,`+${fmt((parseFloat(recForm.numDnevnica)||0)*selEmpForRec.dnevnica)} RSD`],
                       (parseFloat(recForm.numPergola)||0)>0&&[`${recForm.numPergola}× pergola`,`+${fmt((parseFloat(recForm.numPergola)||0)*pRSD())} RSD`],
                     ].filter(Boolean).map(([l,v])=>(
                       <div key={l} style={{ display:'flex', justifyContent:'space-between', fontSize:13, color:GD, marginBottom:4 }}>
@@ -732,7 +761,7 @@ const ProhorecaApp = () => {
                 const emp=employees.find(e=>e.id===rec.eid); const total=calcTotal(rec.eid,month); const paid=totalPaid(rec.eid,month);
                 const isEd=editRec?.id===rec.id;
                 const[yr2,mo2]=month.split('-').map(Number); const m02=mo2-1;
-                const wdCnt=hasAtt(rec.eid,month,attendance)?effDays(yr2,m02,rec.eid,month,attendance):stdDays(yr2,m02);
+                const wdCnt=hasAtt(rec.eid,month,attendance)?cntW(yr2,m02,rec.eid,month,attendance):stdDays(yr2,m02);
                 const sdCnt=stdDays(yr2,m02);
                 return (
                   <Card key={rec.id} style={{ padding:18 }}>
@@ -740,7 +769,6 @@ const ProhorecaApp = () => {
                       <div>
                         <p style={{ fontFamily:MF, fontWeight:700, fontSize:14, color:A, marginBottom:12 }}>{emp?.name}</p>
                         <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(150px,1fr))', gap:10, marginBottom:12 }}>
-                          <Field label="Dnevnice" type="number" value={editRec.numDnevnica} onChange={e=>setEditRec(p=>({...p,numDnevnica:e.target.value}))}/>
                           <Field label="Pergole" type="number" value={editRec.numPergola} onChange={e=>setEditRec(p=>({...p,numPergola:e.target.value}))}/>
                           <Field label="Napomena" type="text" value={editRec.note} onChange={e=>setEditRec(p=>({...p,note:e.target.value}))}/>
                         </div>
@@ -756,7 +784,6 @@ const ProhorecaApp = () => {
                           <p style={{ fontFamily:MF, fontWeight:800, fontSize:15, color:A, margin:'0 0 6px' }}>{emp?.name}</p>
                           <div style={{ display:'flex', flexWrap:'wrap', gap:6 }}>
                             <Tag color="gray">Osnova: {fmt(calcBase(rec.eid,month))} RSD <span style={{ color:'#9CA3AF', fontWeight:400 }}>({wdCnt}/{sdCnt}d)</span></Tag>
-                            {rec.numDnevnica>0&&<Tag color="gold">{rec.numDnevnica}× dnevnica = {fmt(rec.numDnevnica*(employees.find(e=>e.id===rec.eid)?.dnevnica||0))} RSD</Tag>}
                             {rec.numPergola>0&&<Tag color="gold">{rec.numPergola}× pergola = {fmt(rec.numPergola*pRSD())} RSD</Tag>}
                           </div>
                           {rec.note&&<p style={{ fontFamily:CF, fontStyle:'italic', fontSize:13, color:'#9CA3AF', margin:'6px 0 0' }}>{rec.note}</p>}
