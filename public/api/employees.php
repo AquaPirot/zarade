@@ -6,7 +6,7 @@ $id     = isset($_GET['id']) ? (int)$_GET['id'] : 0;
 
 if ($method === 'GET') {
     respond(db()->query(
-        "SELECT id, name, agreed_salary, dnevnica FROM employees WHERE active=1 ORDER BY name"
+        "SELECT id, name, agreed_salary, dnevnica, teren_naknada FROM employees WHERE active=1 ORDER BY name"
     )->fetchAll());
 }
 
@@ -14,15 +14,16 @@ if ($method === 'POST') {
     $d = body();
     if (empty($d['name'])) fail('name required');
     $st = db()->prepare(
-        "INSERT INTO employees (name, agreed_salary, dnevnica) VALUES (?, ?, ?)"
+        "INSERT INTO employees (name, agreed_salary, dnevnica, teren_naknada) VALUES (?, ?, ?, ?)"
     );
     $st->execute([
         trim($d['name']),
         floatval($d['agreed_salary'] ?? 0),
         floatval($d['dnevnica'] ?? 0),
+        floatval($d['teren_naknada'] ?? 0),
     ]);
     $newId = (int)db()->lastInsertId();
-    respond(db()->query("SELECT id, name, agreed_salary, dnevnica FROM employees WHERE id=$newId")->fetch());
+    respond(db()->query("SELECT id, name, agreed_salary, dnevnica, teren_naknada FROM employees WHERE id=$newId")->fetch());
 }
 
 if ($method === 'PUT') {
@@ -30,15 +31,16 @@ if ($method === 'PUT') {
     $d = body();
     if (empty($d['name'])) fail('name required');
     $st = db()->prepare(
-        "UPDATE employees SET name=?, agreed_salary=?, dnevnica=? WHERE id=?"
+        "UPDATE employees SET name=?, agreed_salary=?, dnevnica=?, teren_naknada=? WHERE id=?"
     );
     $st->execute([
         trim($d['name']),
         floatval($d['agreed_salary'] ?? 0),
         floatval($d['dnevnica'] ?? 0),
+        floatval($d['teren_naknada'] ?? 0),
         $id,
     ]);
-    respond(db()->query("SELECT id, name, agreed_salary, dnevnica FROM employees WHERE id=$id")->fetch());
+    respond(db()->query("SELECT id, name, agreed_salary, dnevnica, teren_naknada FROM employees WHERE id=$id")->fetch());
 }
 
 if ($method === 'DELETE') {

@@ -60,7 +60,7 @@ const api = {
 };
 
 // Convert PHP row → employee object
-const toEmp = (r) => ({ id: +r.id, name: r.name, agreedSalary: parseFloat(r.agreed_salary)||0, dnevnica: parseFloat(r.dnevnica)||0 });
+const toEmp = (r) => ({ id: +r.id, name: r.name, agreedSalary: parseFloat(r.agreed_salary)||0, dnevnica: parseFloat(r.dnevnica)||0, terenNaknada: parseFloat(r.teren_naknada)||0 });
 // Convert PHP rows → attendance nested object
 const toAtt = (rows) => {
   const att = {};
@@ -344,7 +344,7 @@ const ProhorecaApp = () => {
   const [annualYear, setAnnualYear]     = useState(()=>new Date().getFullYear());
 
   // Worker form
-  const [newEmp, setNewEmp]   = useState({ name:'', agreedSalary:'', dnevnica:'' });
+  const [newEmp, setNewEmp]   = useState({ name:'', agreedSalary:'', terenNaknada:'' });
   const [editEmp, setEditEmp] = useState(null);
   // Record form
   const [recForm, setRecForm] = useState({ eid:'', numDnevnica:'', numPergola:'', note:'' });
@@ -423,11 +423,15 @@ const ProhorecaApp = () => {
   // Broj sistema (pergola) sa terena za radnika u mesecu
   const terenSystems = (eid,m) => tereni.filter(t=>t.month===m)
     .reduce((s,t)=> s + t.workers.filter(w=>w.eid===eid).reduce((a,w)=>a+(w.systems||0),0), 0);
-  // Dodaci = pergole sa terena + ručne pergole (legacy). Dnevnice/dani idu preko kalendara.
+  const terenVisits  = (eid,m) => tereni.filter(t=>t.month===m && t.workers.some(w=>w.eid===eid)).length;
+  // Dodaci = pergole sa terena + ručne pergole + naknada za odlazak na teren
   const calcExtras = (eid,m) => {
+    const emp=employees.find(e=>e.id===eid);
     const rec=records.find(r=>r.eid===eid&&r.month===m);
     const manual=(rec?.numPergola||0);
-    return (terenSystems(eid,m)+manual)*pRSD();
+    const pergolaRSD=(terenSystems(eid,m)+manual)*pRSD();
+    const naknadaRSD=terenVisits(eid,m)*(emp?.terenNaknada||0);
+    return pergolaRSD+naknadaRSD;
   };
   const calcTotal    = (eid,m) => { const emp=employees.find(e=>e.id===eid); if(!emp)return null; return calcBase(eid,m)+calcExtras(eid,m); };
   const totalMonth   = (m) => employees.reduce((s,e)=>s+Math.max(0,calcTotal(e.id,m)??0),0);
@@ -445,7 +449,7 @@ const ProhorecaApp = () => {
   const addEmp = async () => {
     if(!newEmp.name.trim()||!newEmp.agreedSalary) return;
     try {
-      const created = await api.addEmployee({ name:newEmp.name.trim(), agreed_salary:parseFloat(newEmp.agreedSalary)||0, dnevnica:parseFloat(newEmp.dnevnica)||0 });
+      const created = await api.addEmployee({ name:newEmp.name.trim(), agreed_salary:parseFloat(newEmp.agreedSalary)||0, dnevnica:0, teren_naknada:parseFloat(newEmp.terenNaknada)||0 });
       if(created?.error) return showErr(created.error);
       setEmployees(p=>[...p, toEmp(created)]);
       setNewEmp({ name:'', agreedSalary:'', dnevnica:'' });
@@ -454,7 +458,7 @@ const ProhorecaApp = () => {
   const saveEmp = async () => {
     if(!editEmp?.name.trim()) return;
     try {
-      const updated = await api.updateEmployee(editEmp.id, { name:editEmp.name.trim(), agreed_salary:parseFloat(editEmp.agreedSalary)||0, dnevnica:parseFloat(editEmp.dnevnica)||0 });
+      const updated = await api.updateEmployee(editEmp.id, { name:editEmp.name.trim(), agreed_salary:parseFloat(editEmp.agreedSalary)||0, dnevnica:0, teren_naknada:parseFloat(editEmp.terenNaknada)||0 });
       if(updated?.error) return showErr(updated.error);
       setEmployees(p=>p.map(e=>e.id===editEmp.id?toEmp(updated):e));
       setEditEmp(null);
@@ -563,6 +567,8 @@ const ProhorecaApp = () => {
         const sysM=terenSystems(emp.id,month);
         if(sysM>0){doc.setTextColor(0,100,0);doc.text(`Pergole (tereni): ${sysM}x ${fmt(pRSD())} = ${fmt(sysM*pRSD())} RSD`,mg+4,y);y+=5;doc.setTextColor(0,0,0);}
         if(rec?.numPergola>0){doc.setTextColor(0,100,0);doc.text(`Pergole (rucno): ${rec.numPergola}x ${fmt(pRSD())} = ${fmt(rec.numPergola*pRSD())} RSD`,mg+4,y);y+=5;doc.setTextColor(0,0,0);}
+        const naknadaM=terenVisits(emp.id,month)*(emp.terenNaknada||0);
+        if(naknadaM>0){doc.setTextColor(0,100,0);doc.text(`Naknada za teren: ${terenVisits(emp.id,month)}x ${fmt(emp.terenNaknada)} = ${fmt(naknadaM)} RSD`,mg+4,y);y+=5;doc.setTextColor(0,0,0);}
         doc.setFont(undefined,'bold'); doc.setTextColor(0,110,0);
         doc.text(`GOTOVINA: ${fmt(total)} RSD (${fmtEur(total,eurRate)})`,mg+4,y); y+=5;
         const paid=totalPaid(emp.id,month);
@@ -602,6 +608,8 @@ const ProhorecaApp = () => {
       const sysP=terenSystems(eid,m);
       if(sysP>0) drawRow(`Pergole (tereni): ${sysP}x ${fmt(pRSD())} RSD`,`${fmt(sysP*pRSD())} RSD`,[0,110,0]);
       if(rec?.numPergola>0) drawRow(`Pergole (rucno): ${rec.numPergola}x ${fmt(pRSD())} RSD`,`${fmt(rec.numPergola*pRSD())} RSD`,[0,110,0]);
+      const naknadaPS=terenVisits(eid,m)*(emp.terenNaknada||0);
+      if(naknadaPS>0) drawRow(`Naknada za teren: ${terenVisits(eid,m)}x ${fmt(emp.terenNaknada)} RSD`,`${fmt(naknadaPS)} RSD`,[0,110,0]);
       const notes=Object.entries(attendance[eid]?.[m]||{}).filter(([,dd])=>dd?.note);
       if(notes.length>0){ y+=4; doc.setFontSize(9); doc.setTextColor(120,120,120); doc.text('NAPOMENE',mg,y); y+=5; doc.line(mg,y,pw-mg,y); y+=5; notes.sort(([a],[b])=>+a-+b).forEach(([d,dd])=>{ doc.setFontSize(9); doc.setTextColor(100,90,0); doc.text(`${d}.  ${dd.note}`,mg+4,y); y+=6; }); }
       y+=6; doc.line(mg,y,pw-mg,y); y+=8;
@@ -615,6 +623,66 @@ const ProhorecaApp = () => {
       doc.setFontSize(8); doc.setTextColor(160,160,160); doc.text('Radnik',mg+30,y+5,{align:'center'}); doc.text('Poslodavac',pw-mg-30,y+5,{align:'center'});
       doc.setFontSize(7); doc.setTextColor(180,180,180); doc.text('by AG GROUP',pw/2,doc.internal.pageSize.height-10,{align:'center'});
       doc.save(`Listic_${emp.name.replace(/\s+/g,'_')}_${m}.pdf`);
+    } catch(err){console.error(err);}
+  };
+
+  // ── PDF — tereni report ──
+  const genTereniPDF = async () => {
+    try {
+      const jsPDF=(await import('jspdf')).default;
+      const doc=new jsPDF(); const pw=doc.internal.pageSize.width; const mg=20; let y=28;
+      doc.setFontSize(16); doc.setFont(undefined,'bold');
+      doc.text(`IZVESTAJ TERENA — ${appName.toUpperCase()}`,pw/2,y,{align:'center'}); y+=8;
+      doc.setFontSize(10); doc.setFont(undefined,'normal');
+      doc.text(`${fmtM(month)} · ${new Date().toLocaleDateString('sr-RS')} · Bonus pergola: ${pergolaBonus} EUR`,pw/2,y,{align:'center'}); y+=14;
+      const mt=tereni.filter(t=>t.month===month);
+      if(mt.length===0){
+        doc.setFontSize(11); doc.setTextColor(150,150,150);
+        doc.text(`Nema evidentiranih terena za ${fmtM(month)}.`,pw/2,y,{align:'center'});
+      } else {
+        mt.forEach((t,idx)=>{
+          if(y>230){doc.addPage();y=24;}
+          const totSys=t.workers.reduce((a,w)=>a+(w.systems||0),0);
+          doc.setFontSize(11); doc.setFont(undefined,'bold'); doc.setTextColor(28,28,30);
+          doc.text(`${idx+1}.  ${t.location||'Teren'}`,mg,y);
+          doc.setFontSize(9); doc.setFont(undefined,'normal'); doc.setTextColor(100,100,100);
+          doc.text(t.date?new Date(t.date).toLocaleDateString('sr-RS'):'',pw-mg,y,{align:'right'}); y+=6;
+          doc.setFontSize(9); doc.setTextColor(70,70,70);
+          doc.text(`Ukupno sistema: ${totSys}  ·  Bonus: ${fmt(totSys*pRSD())} RSD`,mg+4,y); y+=5;
+          t.workers.forEach(w=>{
+            if(y>260){doc.addPage();y=24;}
+            const emp=employees.find(e=>e.id===w.eid);
+            const naknada=emp?.terenNaknada||0;
+            doc.setTextColor(40,40,40);
+            doc.text(`  ${emp?.name||w.name||'?'}`,mg+4,y);
+            doc.text(`${w.systems} sist. → ${fmt(w.systems*pRSD())} RSD${naknada>0?`  +  naknada ${fmt(naknada)} RSD`:''}`,mg+72,y); y+=5;
+          });
+          if(t.note){doc.setFontSize(8);doc.setTextColor(140,140,140);doc.text(`  Napomena: ${t.note}`,mg+4,y);y+=5;doc.setFontSize(9);}
+          y+=4; doc.setDrawColor(220,215,200); doc.line(mg,y-2,pw-mg,y-2); y+=4;
+        });
+        if(y>220){doc.addPage();y=24;}
+        y+=4;
+        doc.setFontSize(12); doc.setFont(undefined,'bold'); doc.setTextColor(0,0,0);
+        doc.text('REZIME PO RADNIKU',mg,y); y+=4;
+        doc.setDrawColor(201,168,76); doc.setLineWidth(0.7); doc.line(mg,y,pw-mg,y); doc.setLineWidth(0.2); y+=8;
+        employees.forEach(emp=>{
+          const visits=terenVisits(emp.id,month);
+          if(!visits) return;
+          if(y>260){doc.addPage();y=24;}
+          const sys=terenSystems(emp.id,month);
+          const naknada=visits*(emp.terenNaknada||0);
+          const sysBonus=sys*pRSD();
+          doc.setFontSize(10); doc.setFont(undefined,'bold'); doc.setTextColor(28,28,30);
+          doc.text(emp.name,mg,y);
+          doc.setFont(undefined,'normal'); doc.setFontSize(9); doc.setTextColor(80,80,80);
+          doc.text(`${visits} teren${visits>1?'a':''}  ·  ${sys} sistema → ${fmt(sysBonus)} RSD${naknada>0?`  ·  naknada ${fmt(naknada)} RSD`:''}`,mg+58,y); y+=5;
+          doc.setFont(undefined,'bold'); doc.setTextColor(0,110,0);
+          doc.text(`Ukupno: ${fmt(sysBonus+naknada)} RSD`,mg+4,y); y+=8; doc.setTextColor(0,0,0);
+        });
+      }
+      const pgs=doc.internal.getNumberOfPages();
+      for(let i=1;i<=pgs;i++){doc.setPage(i);doc.setFontSize(8);doc.setTextColor(160,160,160);doc.text('by AG GROUP',pw/2,doc.internal.pageSize.height-10,{align:'center'});doc.text(`${i}/${pgs}`,pw-mg,doc.internal.pageSize.height-10,{align:'right'});}
+      doc.save(`${appName}_Tereni_${month}.pdf`);
     } catch(err){console.error(err);}
   };
 
@@ -698,6 +766,7 @@ const ProhorecaApp = () => {
                 <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(180px,1fr))', gap:12, marginBottom:14 }}>
                   <Field label="Ime i prezime" type="text" placeholder="npr. Marko Marković" value={newEmp.name} onChange={e=>setNewEmp({...newEmp,name:e.target.value})} onKeyDown={e=>e.key==='Enter'&&addEmp()}/>
                   <Field label="Mesečna plata (RSD)" type="number" placeholder="0" value={newEmp.agreedSalary} onChange={e=>setNewEmp({...newEmp,agreedSalary:e.target.value})} onKeyDown={e=>e.key==='Enter'&&addEmp()}/>
+                  <Field label="Naknada za teren (RSD)" type="number" placeholder="0" value={newEmp.terenNaknada} onChange={e=>setNewEmp({...newEmp,terenNaknada:e.target.value})} onKeyDown={e=>e.key==='Enter'&&addEmp()}/>
                 </div>
                 <p style={{ fontFamily:CF, fontStyle:'italic', fontSize:13, color:'#A8A29E', margin:'0 0 14px' }}>Dnevnica se računa automatski (plata ÷ radni dani u mesecu).</p>
                 <Btn onClick={addEmp}><Plus size={15}/> Dodaj radnika</Btn>
@@ -709,6 +778,7 @@ const ProhorecaApp = () => {
                       <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(160px,1fr))', gap:10, marginBottom:12 }}>
                         <Field label="Ime i prezime" type="text" value={editEmp.name} onChange={e=>setEditEmp(p=>({...p,name:e.target.value}))}/>
                         <Field label="Mesečna plata" type="number" value={editEmp.agreedSalary} onChange={e=>setEditEmp(p=>({...p,agreedSalary:e.target.value}))}/>
+                        <Field label="Naknada za teren" type="number" value={editEmp.terenNaknada} onChange={e=>setEditEmp(p=>({...p,terenNaknada:e.target.value}))}/>
                       </div>
                       <div style={{ display:'flex', gap:8 }}>
                         <Btn onClick={saveEmp} sm><Check size={14}/> Sačuvaj</Btn>
@@ -723,10 +793,11 @@ const ProhorecaApp = () => {
                         <div style={{ display:'flex', gap:12, flexWrap:'wrap' }}>
                           <span style={{ fontFamily:CF, fontStyle:'italic', fontSize:13, color:'#78716C' }}>Plata: <strong style={{ color:A2, fontFamily:MF, fontStyle:'normal' }}>{fmt(emp.agreedSalary)} RSD</strong></span>
                           <span style={{ fontFamily:CF, fontStyle:'italic', fontSize:13, color:'#78716C' }}>Dnevnica ({fmtM(month).split(' ')[0].toLowerCase()}): <strong style={{ color:G, fontFamily:MF, fontStyle:'normal' }}>{fmt(dnevnicaFor(emp.agreedSalary,...month.split('-').map((n,i)=>i===0?+n:+n-1)))} RSD</strong></span>
+                          {(emp.terenNaknada||0)>0&&<span style={{ fontFamily:CF, fontStyle:'italic', fontSize:13, color:'#78716C' }}>Naknada/teren: <strong style={{ color:A2, fontFamily:MF, fontStyle:'normal' }}>{fmt(emp.terenNaknada)} RSD</strong></span>}
                         </div>
                       </div>
                       <div style={{ display:'flex', gap:4 }}>
-                        <Btn v="ghost" sm onClick={()=>setEditEmp({id:emp.id,name:emp.name,agreedSalary:String(emp.agreedSalary),dnevnica:String(emp.dnevnica)})} style={{ border:'none', padding:8 }}><Edit2 size={15} color={G}/></Btn>
+                        <Btn v="ghost" sm onClick={()=>setEditEmp({id:emp.id,name:emp.name,agreedSalary:String(emp.agreedSalary),terenNaknada:String(emp.terenNaknada)})} style={{ border:'none', padding:8 }}><Edit2 size={15} color={G}/></Btn>
                         <Btn v="ghost" sm onClick={()=>delEmp(emp.id)} style={{ border:'none', padding:8 }}><Trash2 size={15} color="#EF4444"/></Btn>
                       </div>
                     </div>
@@ -860,6 +931,11 @@ const ProhorecaApp = () => {
                     </Card>
                   );
                 })}
+                {tereni.filter(t=>t.month===month).length>0&&(
+                  <div style={{ display:'flex', justifyContent:'center', paddingTop:8 }}>
+                    <Btn onClick={genTereniPDF} v="dark"><Download size={17}/> Izveštaj terena PDF</Btn>
+                  </div>
+                )}
                 {tereni.filter(t=>t.month===month).length===0&&<Empty Icon={MapPin} text={`Nema terena za ${fmtM(month)}`}/>}
               </>)}
             </div>
@@ -899,6 +975,7 @@ const ProhorecaApp = () => {
                           <Tag color="gray">Osnova: {fmt(calcBase(emp.id,month))} RSD <span style={{ color:'#9CA3AF', fontWeight:400 }}>({wdCnt}/{sdCnt}d)</span></Tag>
                           {sys>0&&<Tag color="gold"><MapPin size={11}/> {sys}× pergola = {fmt(sys*pRSD())} RSD</Tag>}
                           {manualP>0&&<Tag color="gold">{manualP}× pergola (ručno) = {fmt(manualP*pRSD())} RSD</Tag>}
+                          {(emp.terenNaknada||0)>0&&terenVisits(emp.id,month)>0&&<Tag color="gold"><MapPin size={11}/> {terenVisits(emp.id,month)}× naknada = {fmt(terenVisits(emp.id,month)*(emp.terenNaknada||0))} RSD</Tag>}
                         </div>
                         {paid>0&&<p style={{ fontFamily:MF, fontSize:11, color:'#3B82F6', margin:'6px 0 0', fontWeight:600 }}>Isplaćeno: {fmt(paid)} RSD · Ostatak: {fmt((total||0)-paid)} RSD</p>}
                       </div>

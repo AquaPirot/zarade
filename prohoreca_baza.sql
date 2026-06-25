@@ -31,7 +31,8 @@ CREATE TABLE IF NOT EXISTS `employees` (
   `id`             INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
   `name`           VARCHAR(200) NOT NULL,
   `agreed_salary`  DECIMAL(12,2) NOT NULL DEFAULT 0.00,  -- mesecna plata RSD
-  `dnevnica`       DECIMAL(12,2) NOT NULL DEFAULT 0.00,  -- dnevnica RSD
+  `dnevnica`       DECIMAL(12,2) NOT NULL DEFAULT 0.00,  -- dnevnica RSD (legacy, racuna se automatski)
+  `teren_naknada`  DECIMAL(12,2) NOT NULL DEFAULT 0.00,  -- fiksna naknada po odlasku na teren RSD
   `active`         TINYINT(1) NOT NULL DEFAULT 1,
   `created_at`     TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
